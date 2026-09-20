@@ -725,7 +725,10 @@ class LauncherApp(ctk.CTk):
     def _ensure_proxy_routing_current(self):
         settings = self.proxy_settings_store.load()
 
-        if not settings.proxies:
+        if (
+            not settings.proxies
+            and not settings.proxifyre_path.strip()
+        ):
             return
 
         if not routing_config_matches(
@@ -750,17 +753,21 @@ class LauncherApp(ctk.CTk):
         )
 
     def _apply_proxy_settings(self, settings):
-        if not settings.proxies:
+        if not settings.proxifyre_path.strip():
             raise ValueError(
-                "Chưa nhập SOCKS5 proxy"
+                "Hãy chọn ProxiFyre.exe trước khi áp dụng"
             )
 
         self._log(
             "Proxy",
             "INFO",
             (
-                "Đang tạo route: 1-30 Direct, "
-                "31+ qua SOCKS5 theo nhóm 30"
+                (
+                    "Đang tắt route SOCKS5; tất cả profile sẽ Direct"
+                    if not settings.proxies
+                    else
+                    "Đang tạo route: 1-30 Direct, 31+ qua SOCKS5 theo nhóm 30"
+                )
             ),
         )
 
@@ -1269,7 +1276,7 @@ class LauncherApp(ctk.CTk):
     def _continue_login(self):
         try:
             self._continue_login_for(self._selected_profile())
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, RuntimeError) as exc:
             messagebox.showerror("Mở game", str(exc), parent=self)
 
     def _continue_login_for(self, profile_id):
@@ -1382,7 +1389,7 @@ class LauncherApp(ctk.CTk):
             )
             self._start_profile_ids(ids)
 
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, RuntimeError) as exc:
             messagebox.showerror("Start profiles", str(exc), parent=self)
 
     def _start_single(self, profile_id):
@@ -1391,7 +1398,7 @@ class LauncherApp(ctk.CTk):
             self.selected_profile_id = profile_id
             self._start_profile_ids((profile_id,))
 
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, RuntimeError) as exc:
             messagebox.showerror("Start profile", str(exc), parent=self)
 
     def _stop_selected(self):
