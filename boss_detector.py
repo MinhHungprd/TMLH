@@ -219,9 +219,31 @@ class BossDetector:
         behavior for tests and compatibility.
         """
         if self.roi_capture is not None:
-            raw_width, raw_height = get_client_size(
-                context.window_handle
+            raw_width = int(
+                getattr(
+                    context,
+                    "window_width",
+                    0,
+                )
+                or 0
             )
+            raw_height = int(
+                getattr(
+                    context,
+                    "window_height",
+                    0,
+                )
+                or 0
+            )
+
+            if (
+                raw_width <= 0
+                or raw_height <= 0
+            ):
+                raw_width, raw_height = get_client_size(
+                    context.window_handle
+                )
+
             raw_roi = self.roi_capture(
                 context.window_handle,
                 BOSS_HP,
