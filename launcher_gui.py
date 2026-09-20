@@ -21,7 +21,7 @@ from profile_auth import save_profile_auth
 from profile_manager import MissingGameFilesError, ProfileManager
 from profile_models import ProfileRuntimeContext
 from profile_storage import ProfileStorage
-from ui_components import CompactCard, EditProfileDialog, ProfileRow
+from ui_components import CompactCard, EditProfileDialog, ProfileRow, PROFILE_COLUMN_WIDTHS
 from ui_theme import APP_NAME, APP_VERSION, BOSS_KEYS, BOSS_LABELS, COLORS
 from window_layout import arrange_windows
 from window_manager import (
@@ -535,26 +535,25 @@ class LauncherApp(ctk.CTk):
             corner_radius=8,
             height=34,
         )
-        header.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
+        header.grid(row=1, column=0, sticky="w", padx=(8, 20), pady=(0, 4))
         header.grid_propagate(False)
 
         columns = (
-            ("", 22),
-            ("Profile", 82),
-            ("TT", 54),
-            ("Boss", 84),
-            ("Size", 70),
-            ("Ctrl", 92),
+            ("", PROFILE_COLUMN_WIDTHS[0]),
+            ("Profile / TT", PROFILE_COLUMN_WIDTHS[1]),
+            ("Boss", PROFILE_COLUMN_WIDTHS[2]),
+            ("Size", PROFILE_COLUMN_WIDTHS[3]),
+            ("Ctrl", PROFILE_COLUMN_WIDTHS[4]),
         )
         for index, (label, width) in enumerate(columns):
-            header.grid_columnconfigure(index, minsize=width, weight=1 if index == 1 else 0)
+            header.grid_columnconfigure(index, minsize=width, weight=0)
             ctk.CTkLabel(
                 header,
                 text=label,
                 text_color=COLORS["muted"],
                 font=ctk.CTkFont(size=8, weight="bold"),
                 anchor="w",
-            ).grid(row=0, column=index, sticky="ew", padx=4, pady=8)
+            ).grid(row=0, column=index, sticky="ew", padx=3, pady=8)
 
         self.rows_frame = ctk.CTkScrollableFrame(
             panel,
