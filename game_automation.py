@@ -83,6 +83,7 @@ class GameLifecycle:
             before_launch=lambda: restore_profile_auth(
                 context.game_path
             ),
+            window_title=context.profile_name,
         )
 
     def resize(self, context):
