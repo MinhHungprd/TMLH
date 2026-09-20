@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 import inspect
+import queue
 import sys
 import threading
 import tkinter as tk
@@ -314,6 +315,12 @@ class LauncherApp(ctk.CTk):
         self.profile_rows = {}
         self.selected_profile_id = None
 
+        # Worker OCR/debug logs are batched onto the Tk thread instead of
+        # scheduling one GUI callback per profile per second.
+        self._log_queue = queue.SimpleQueue()
+        self._log_line_count = 0
+        self._log_flush_after_id = None
+
         self.title(f"{APP_NAME} - Profile Bot")
         self.geometry("480x620")
         self.minsize(460, 560)
@@ -329,6 +336,11 @@ class LauncherApp(ctk.CTk):
         self._build_action_bar()
         self._build_log_panel()
         self._build_footer()
+
+        self._log_flush_after_id = self.after(
+            100,
+            self._flush_worker_logs,
+        )
 
         self._refresh()
         self._update_source_status()
@@ -829,6 +841,9 @@ class LauncherApp(ctk.CTk):
                 font=ctk.CTkFont(size=11),
             ).grid(row=0, column=0, pady=30)
 
+        self._update_header_status()
+
+    def _update_header_status(self):
         running = sum(
             1
             for worker in self.controller.workers.values()
@@ -839,6 +854,21 @@ class LauncherApp(ctk.CTk):
             text=f"●  {running} đang chạy" if running else "●  Sẵn sàng",
             text_color=COLORS["green"],
         )
+
+    def _apply_runtime_status(self, profile_id, status):
+        self.statuses[profile_id] = status
+
+        # Status sorting requires a rebuild. Otherwise update just one row,
+        # avoiding destroy/recreate of every CustomTkinter widget.
+        row = self.profile_rows.get(profile_id)
+        if (
+            self.sort_mode.get() == "TT"
+            or row is None
+        ):
+            self._refresh()
+        else:
+            row.set_status(status)
+            self._update_header_status()
 
     def _focus_profile(self, profile_id):
         self.selected_profile_id = profile_id
@@ -1189,11 +1219,8 @@ class LauncherApp(ctk.CTk):
                 pid,
                 exc,
             ),
-            "on_log": lambda pid, message: self.after(
-                0,
-                self._worker_log,
-                pid,
-                message,
+            "on_log": lambda pid, message: self._log_queue.put(
+                (pid, message)
             ),
         }
 
@@ -1328,6 +1355,29 @@ class LauncherApp(ctk.CTk):
     # LOG / STATE
     # ------------------------------------------------------------------
 
+    def _flush_worker_logs(self):
+        drained = 0
+
+        while drained < 200:
+            try:
+                profile_id, message = (
+                    self._log_queue.get_nowait()
+                )
+            except queue.Empty:
+                break
+
+            self._worker_log(
+                profile_id,
+                message,
+            )
+            drained += 1
+
+        if self.winfo_exists():
+            self._log_flush_after_id = self.after(
+                100,
+                self._flush_worker_logs,
+            )
+
     def _log(self, profile, state, message=""):
         state_text = str(state).upper()
         line = f"[{datetime.now():%H:%M:%S}] [{state_text}]  {profile}"
@@ -1348,6 +1398,18 @@ class LauncherApp(ctk.CTk):
             self.log._textbox.insert("end", line, tag)
         except Exception:
             self.log.insert("end", line)
+
+        self._log_line_count += 1
+
+        # Keep recent diagnostics while preventing an hours-long multi-profile
+        # run from growing the Tk Text widget without bound.
+        if self._log_line_count > 1000:
+            self.log.delete(
+                "1.0",
+                "201.0",
+            )
+            self._log_line_count -= 200
+
         self.log.see("end")
         self.log.configure(state="disabled")
 
@@ -1355,15 +1417,18 @@ class LauncherApp(ctk.CTk):
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
+        self._log_line_count = 0
 
     def _worker_log(self, profile_id, message):
         self._log(profile_id, "INFO", message)
 
     def _worker_status(self, profile_id, state):
         pretty = state.replace("_", " ").title()
-        self.statuses[profile_id] = pretty
+        self._apply_runtime_status(
+            profile_id,
+            pretty,
+        )
         self._log(profile_id, state)
-        self._refresh()
 
         if state in (
             "WAITING_STARTUP",
@@ -1373,21 +1438,36 @@ class LauncherApp(ctk.CTk):
             self._arrange_windows()
 
     def _worker_error(self, profile_id, exc):
-        self.statuses[profile_id] = "Error"
+        self._apply_runtime_status(
+            profile_id,
+            "Error",
+        )
         self._log(profile_id, "ERROR", str(exc))
-        self._refresh()
 
     def _status(self, profile_id, state):
-        self.statuses[profile_id] = state
+        self._apply_runtime_status(
+            profile_id,
+            state,
+        )
         self._log(profile_id, state)
-        self._refresh()
 
     def _error(self, profile_id, exc):
-        self.statuses[profile_id] = "Error"
+        self._apply_runtime_status(
+            profile_id,
+            "Error",
+        )
         self._log(profile_id, "ERROR", str(exc))
-        self._refresh()
 
     def _close(self):
+        if self._log_flush_after_id is not None:
+            try:
+                self.after_cancel(
+                    self._log_flush_after_id
+                )
+            except tk.TclError:
+                pass
+            self._log_flush_after_id = None
+
         for event in self.creation_events.values():
             event.set()
 
