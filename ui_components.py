@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import tkinter as tk
+
 import customtkinter as ctk
 
 from ui_theme import BOSS_LABELS, COLORS, status_palette
@@ -31,14 +33,21 @@ class SectionCard(ctk.CTkFrame):
             anchor="w",
         ).grid(row=0, column=0, sticky="w")
 
+        self.subtitle_label = None
         if subtitle:
-            ctk.CTkLabel(
+            self.subtitle_label = ctk.CTkLabel(
                 header,
                 text=subtitle,
                 text_color=COLORS["muted"],
                 font=ctk.CTkFont(size=11),
                 anchor="e",
-            ).grid(row=0, column=1, sticky="e", padx=(12, 0))
+            )
+            self.subtitle_label.grid(
+                row=0,
+                column=1,
+                sticky="e",
+                padx=(12, 0),
+            )
 
         self.body = ctk.CTkFrame(self, fg_color="transparent")
         self.body.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
@@ -56,7 +65,7 @@ class StatusBadge(ctk.CTkLabel):
             corner_radius=8,
             font=ctk.CTkFont(size=11, weight="bold"),
             height=28,
-            padx=10,
+            width=105,
             **kwargs,
         )
 
@@ -145,7 +154,7 @@ class ProfileRow(ctk.CTkFrame):
         for index, width in enumerate(columns):
             self.grid_columnconfigure(index, minsize=width, weight=1 if index == 1 else 0)
 
-        self.check_var = ctk.BooleanVar(value=selected)
+        self.check_var = tk.BooleanVar(value=selected)
         self.check = ctk.CTkCheckBox(
             self,
             text="",
