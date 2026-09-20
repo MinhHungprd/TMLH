@@ -318,6 +318,7 @@ class LauncherApp(ctk.CTk):
         self.profile_rows = {}
         self.selected_profile_id = None
         self.window_layout_mode = "arrange"
+        self._last_layout_signature = None
 
         # Worker OCR/debug logs are batched onto the Tk thread instead of
         # scheduling one GUI callback per profile per second.
@@ -1407,6 +1408,19 @@ class LauncherApp(ctk.CTk):
             items[0][0]
         )
 
+        signature = (
+            "arrange",
+            tuple(items),
+            working_area,
+        )
+
+        if (
+            not remember
+            and signature
+            == self._last_layout_signature
+        ):
+            return
+
         placements = arrange_windows(
             items,
             working_area,
@@ -1415,6 +1429,7 @@ class LauncherApp(ctk.CTk):
         self._move_placements(
             placements
         )
+        self._last_layout_signature = signature
 
         left, top, width, height = working_area
         right = left + width
@@ -1448,6 +1463,19 @@ class LauncherApp(ctk.CTk):
             items[0][0]
         )
 
+        signature = (
+            "stack",
+            tuple(items),
+            working_area,
+        )
+
+        if (
+            not remember
+            and signature
+            == self._last_layout_signature
+        ):
+            return
+
         placements = stack_windows_for_boss(
             items,
             working_area,
@@ -1465,6 +1493,7 @@ class LauncherApp(ctk.CTk):
                 for place in placements
             ]
         )
+        self._last_layout_signature = signature
 
         if any(
             place.overlap
