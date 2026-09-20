@@ -118,6 +118,7 @@ $ExcludeDirs = @(
     "release",
     "Game",
     "debug",
+    "proxy_runtime",
     "__pycache__",
     ".pytest_cache",
     ".pytest-tmp2",
@@ -131,6 +132,7 @@ $ExcludeDirs = @(
 $ExcludeFiles = @(
     "profiles.json",
     "settings.json",
+    ".tmlh_proxy_settings.bin",
     "*.pyc",
     "*.pyo",
     "*.log",
