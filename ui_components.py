@@ -109,12 +109,12 @@ class ProfileRow(ctk.CTkFrame):
         )
         name.pack(anchor="w")
 
-        status = StatusBadge(profile_cell, runtime_status)
-        status.configure(anchor="w")
-        status.pack(anchor="w", pady=(1, 0))
+        self.status_badge = StatusBadge(profile_cell, runtime_status)
+        self.status_badge.configure(anchor="w")
+        self.status_badge.pack(anchor="w", pady=(1, 0))
 
         name.bind("<Button-1>", lambda _event: on_focus(profile.profile_id))
-        status.bind("<Button-1>", lambda _event: on_focus(profile.profile_id))
+        self.status_badge.bind("<Button-1>", lambda _event: on_focus(profile.profile_id))
 
         boss_label = BOSS_LABELS.get(profile.selected_boss, profile.selected_boss)
         self.boss_combo = ctk.CTkComboBox(
