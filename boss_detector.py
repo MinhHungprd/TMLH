@@ -1,4 +1,5 @@
 import re
+import time
 from pathlib import Path
 
 import cv2
@@ -7,16 +8,49 @@ from automation_constants import BOSS_HP
 from ocr_service import OcrService
 from vision import (
     capture_client,
+    capture_client_roi,
+    get_client_size,
+    normalize_roi_to_base,
     normalize_to_base,
 )
 
 
 class BossDetector:
-    def __init__(self, ocr=None, capture=None):
+    """
+    Boss presence detector.
+
+    Production path captures only the HP ROI. Tests/custom captures still
+    use the legacy full-frame path so existing injection contracts remain
+    compatible.
+    """
+
+    def __init__(
+        self,
+        ocr=None,
+        capture=None,
+        roi_capture=None,
+        *,
+        debug_interval=10.0,
+        now=None,
+    ):
         self.dead_streak = 0
         self.ocr = ocr
         self.capture = capture or capture_client
+
+        # Preserve the old injected capture contract. ROI capture is enabled
+        # automatically only for the normal production capture path.
+        if roi_capture is not None:
+            self.roi_capture = roi_capture
+        elif capture is None:
+            self.roi_capture = capture_client_roi
+        else:
+            self.roi_capture = None
+
+        self.debug_interval = float(debug_interval)
+        self.now = now or time.monotonic
+        self._last_debug_at = None
         self.last_debug = {}
+
     @staticmethod
     def count_visual_glyphs(roi) -> int:
         _, mask = cv2.threshold(
@@ -36,7 +70,7 @@ class BossDetector:
         glyphs = 0
 
         for i in range(1, count):
-            x, y, w, h, area = stats[i]
+            _x, _y, w, h, area = stats[i]
 
             if (
                 area >= 6
@@ -47,6 +81,7 @@ class BossDetector:
                 glyphs += 1
 
         return glyphs
+
     @staticmethod
     def is_alive(text: str) -> bool:
         digits = re.sub(
@@ -65,7 +100,6 @@ class BossDetector:
             return False
 
         self.dead_streak += 1
-
         return self.dead_streak >= 2
 
     @staticmethod
@@ -84,6 +118,23 @@ class BossDetector:
             for char in (text or "")
         )
 
+    def _debug_due(self) -> bool:
+        now = self.now()
+
+        if self._last_debug_at is None:
+            self._last_debug_at = now
+            return True
+
+        if (
+            now
+            - self._last_debug_at
+            >= self.debug_interval
+        ):
+            self._last_debug_at = now
+            return True
+
+        return False
+
     def _save_debug(
         self,
         context,
@@ -94,8 +145,10 @@ class BossDetector:
         inverted,
     ):
         """
-        Chỉ ghi đè ảnh debug cuối cùng.
-        Không tạo hàng nghìn screenshot.
+        Overwrite only the latest diagnostic images.
+
+        The normal boss scan is ROI-only. A full-frame screenshot is captured
+        here only when a throttled failure diagnostic is actually written.
         """
         profile_id = getattr(
             context,
@@ -115,7 +168,14 @@ class BossDetector:
             exist_ok=True,
         )
 
-        # Full frame + khung ROI.
+        if normalized is None:
+            raw = self.capture(
+                context.window_handle
+            )
+            normalized = normalize_to_base(
+                raw
+            )
+
         frame = normalized.copy()
 
         x, y, w, h = BOSS_HP
@@ -132,22 +192,18 @@ class BossDetector:
             str(debug_dir / "last_frame.png"),
             frame,
         )
-
         cv2.imwrite(
             str(debug_dir / "last_roi.png"),
             roi,
         )
-
         cv2.imwrite(
             str(debug_dir / "last_upscaled.png"),
             upscaled,
         )
-
         cv2.imwrite(
             str(debug_dir / "last_binary.png"),
             binary,
         )
-
         cv2.imwrite(
             str(debug_dir / "last_inverted.png"),
             inverted,
@@ -155,21 +211,93 @@ class BossDetector:
 
         return debug_dir
 
-    def read_hp(self, context) -> str:
+    def _capture_roi(self, context):
+        """
+        Return canonical 66x22 HP ROI plus raw client size.
+
+        Custom/injected full-frame captures intentionally keep the previous
+        behavior for tests and compatibility.
+        """
+        if self.roi_capture is not None:
+            raw_width, raw_height = get_client_size(
+                context.window_handle
+            )
+            raw_roi = self.roi_capture(
+                context.window_handle,
+                BOSS_HP,
+            )
+            roi = normalize_roi_to_base(
+                raw_roi,
+                BOSS_HP,
+            )
+            return roi, None, raw_width, raw_height
+
         raw = self.capture(
             context.window_handle
         )
-
         raw_height, raw_width = raw.shape[:2]
-
-        # Vision canonical 860x484.
         normalized = normalize_to_base(raw)
 
         x, y, w, h = BOSS_HP
         roi = normalized[
             y:y + h,
-            x:x + w
+            x:x + w,
         ]
+
+        return (
+            roi,
+            normalized,
+            raw_width,
+            raw_height,
+        )
+
+    def _set_debug(
+        self,
+        *,
+        raw_width,
+        raw_height,
+        roi,
+        chosen_name,
+        chosen_text,
+        alive,
+        attempts,
+        visual_glyphs,
+        visual_alive,
+        debug_dir,
+    ):
+        self.last_debug = {
+            "raw_size": (
+                raw_width,
+                raw_height,
+            ),
+            "roi": BOSS_HP,
+            "roi_shape": (
+                roi.shape[1],
+                roi.shape[0],
+            ),
+            "roi_min": int(roi.min()),
+            "roi_max": int(roi.max()),
+            "roi_mean": round(
+                float(roi.mean()),
+                2,
+            ),
+            "chosen": chosen_name,
+            "text": chosen_text,
+            "alive": alive,
+            "attempts": attempts,
+            "visual_glyphs": visual_glyphs,
+            "visual_alive": visual_alive,
+            "debug_dir": (
+                str(debug_dir)
+                if debug_dir
+                else None
+            ),
+        }
+
+    def read_hp(self, context) -> str:
+        roi, normalized, raw_width, raw_height = (
+            self._capture_roi(context)
+        )
 
         if roi.size == 0:
             raise RuntimeError(
@@ -180,8 +308,27 @@ class BossDetector:
         visual_glyphs = self.count_visual_glyphs(
             roi
         )
-
         visual_alive = visual_glyphs >= 3
+
+        # The worker already treats visual_alive OR ocr_alive as alive.
+        # Therefore OCR adds no decision value when the visual detector
+        # has positively found the HP digits. Skip expensive Tesseract.
+        if visual_alive:
+            self._set_debug(
+                raw_width=raw_width,
+                raw_height=raw_height,
+                roi=roi,
+                chosen_name="visual",
+                chosen_text="",
+                alive=False,
+                attempts=[],
+                visual_glyphs=visual_glyphs,
+                visual_alive=True,
+                debug_dir=None,
+            )
+            return ""
+
+        x, y, w, h = BOSS_HP
 
         # 66x22 -> 264x88.
         upscaled = cv2.resize(
@@ -216,8 +363,7 @@ class BossDetector:
 
         attempts = []
 
-        # Ưu tiên grayscale.
-        # Nếu không thấy số mới thử threshold.
+        # Keep the existing fallback order and OCR semantics unchanged.
         for name, image in (
             ("gray", upscaled),
             ("binary", binary),
@@ -231,14 +377,9 @@ class BossDetector:
                 (name, text)
             )
 
-            # Có số rồi thì không cần gọi
-            # Tesseract thêm lần nữa.
             if self.is_alive(text):
                 break
 
-        # Nếu không candidate nào có số,
-        # chọn output có nhiều digit nhất,
-        # rồi mới xét độ dài.
         chosen_name, chosen_text = max(
             attempts,
             key=lambda item: (
@@ -253,8 +394,13 @@ class BossDetector:
 
         debug_dir = None
 
-        # OCR fail -> lưu ảnh để kiểm tra.
-        if not alive and not visual_alive:
+        # Disk diagnostics do not affect automation logic. Limit writes
+        # to avoid I/O spikes when several profiles lose the boss together.
+        if (
+            not alive
+            and not visual_alive
+            and self._debug_due()
+        ):
             debug_dir = self._save_debug(
                 context,
                 normalized,
@@ -264,33 +410,17 @@ class BossDetector:
                 inverted,
             )
 
-        self.last_debug = {
-            "raw_size": (
-                raw_width,
-                raw_height,
-            ),
-            "roi": BOSS_HP,
-            "roi_shape": (
-                roi.shape[1],
-                roi.shape[0],
-            ),
-            "roi_min": int(roi.min()),
-            "roi_max": int(roi.max()),
-            "roi_mean": round(
-                float(roi.mean()),
-                2,
-            ),
-            "chosen": chosen_name,
-            "text": chosen_text,
-            "alive": alive,
-            "attempts": attempts,
-            "visual_glyphs": visual_glyphs,
-            "visual_alive": visual_alive,
-            "debug_dir": (
-                str(debug_dir)
-                if debug_dir
-                else None
-            ),
-        }
+        self._set_debug(
+            raw_width=raw_width,
+            raw_height=raw_height,
+            roi=roi,
+            chosen_name=chosen_name,
+            chosen_text=chosen_text,
+            alive=alive,
+            attempts=attempts,
+            visual_glyphs=visual_glyphs,
+            visual_alive=visual_alive,
+            debug_dir=debug_dir,
+        )
 
         return chosen_text
