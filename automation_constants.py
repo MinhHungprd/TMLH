@@ -22,6 +22,12 @@ BOSS_ENTER_WAIT = 3.0
 # Quét HP mỗi 1 giây.
 BOSS_OCR_INTERVAL = 1.0
 
+# Phân tán thời điểm scan giữa nhiều profile để tránh 10 cửa sổ
+# cùng gọi screen capture đúng một thời điểm.
+# 10 worker đầu tiên nhận phase 0.0, 0.1, ... 0.9 giây.
+BOSS_SCAN_STAGGER_SLOTS = 10
+BOSS_SCAN_STAGGER_STEP = 0.1
+
 # Không thấy boss liên tục 3 giây
 # mới xác nhận boss chết.
 BOSS_DEAD_CONFIRM_SECONDS = 3.0
