@@ -1,5 +1,6 @@
 import re
 import shutil
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -99,3 +100,49 @@ class ProfileManager:
                 ".tmlh_profile_auth.bin",
             ),
         )
+
+    def rename_profile(
+        self,
+        profile: Profile,
+        new_name: str,
+        existing: list[Profile],
+    ) -> Profile:
+        """Rename a stopped profile and its clone directory safely."""
+        safe_name = validate_profile_name(new_name, existing)
+
+        if safe_name == profile.profile_name:
+            return profile
+
+        current = self._checked_destination(profile)
+        target = profile_clone_path(self.bot_root, safe_name)
+
+        if target.exists():
+            raise FileExistsError(target)
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        if current.exists():
+            # Windows can be awkward for case-only renames, so use a temporary hop.
+            if current.name.casefold() == target.name.casefold():
+                temporary = current.with_name(current.name + ".__rename_tmp__")
+                if temporary.exists():
+                    raise FileExistsError(temporary)
+                current.rename(temporary)
+                temporary.rename(target)
+            else:
+                current.rename(target)
+
+        return replace(
+            profile,
+            profile_id=safe_name,
+            profile_name=safe_name,
+            game_path=str(target.resolve()),
+        )
+
+    def delete_profile(self, profile: Profile) -> None:
+        """Delete only this profile clone. The original game source is untouched."""
+        destination = self._checked_destination(profile)
+
+        if destination.exists():
+            shutil.rmtree(destination)
+
