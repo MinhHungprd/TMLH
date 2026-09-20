@@ -24,11 +24,14 @@ from profile_models import ProfileRuntimeContext
 from profile_storage import ProfileStorage
 from ui_components import CompactCard, EditProfileDialog, ProfileRow, PROFILE_COLUMN_WIDTHS
 from ui_theme import APP_NAME, APP_VERSION, BOSS_KEYS, BOSS_LABELS, COLORS
-from window_layout import arrange_windows
+from window_layout import arrange_windows, stack_windows_for_boss
 from window_manager import (
     PROFILE_LAUNCH_LOCK,
     acquire_profile_window,
+    boss_scan_reveal_height,
+    clear_boss_stack_order,
     resize_client,
+    set_boss_stack_order,
     set_window_topmost,
 )
 
@@ -314,6 +317,7 @@ class LauncherApp(ctk.CTk):
         self.creation_events = {}
         self.profile_rows = {}
         self.selected_profile_id = None
+        self.window_layout_mode = "arrange"
 
         # Worker OCR/debug logs are batched onto the Tk thread instead of
         # scheduling one GUI callback per profile per second.
@@ -632,37 +636,48 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             actions,
             text="▶ Start",
-            width=92,
+            width=78,
             height=24,
             fg_color=COLORS["cyan"],
             hover_color=COLORS["blue"],
             text_color=COLORS["black"],
             font=ctk.CTkFont(size=9, weight="bold"),
             command=self._start_selected,
-        ).pack(side="left", padx=3)
+        ).pack(side="left", padx=2)
 
         ctk.CTkButton(
             actions,
             text="■ Stop",
-            width=82,
+            width=70,
             height=24,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["red_hover"],
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=9, weight="bold"),
             command=self._stop_selected,
-        ).pack(side="left", padx=3)
+        ).pack(side="left", padx=2)
 
         ctk.CTkButton(
             actions,
-            text="▣ Xếp cửa sổ",
-            width=112,
+            text="▣ Xếp",
+            width=86,
             height=24,
             fg_color=COLORS["purple"],
             hover_color=COLORS["purple_hover"],
             font=ctk.CTkFont(size=9, weight="bold"),
             command=self._arrange_windows,
-        ).pack(side="left", padx=3)
+        ).pack(side="left", padx=2)
+
+        ctk.CTkButton(
+            actions,
+            text="▤ Chồng",
+            width=86,
+            height=24,
+            fg_color=COLORS["surface_soft"],
+            hover_color=COLORS["border_bright"],
+            font=ctk.CTkFont(size=9, weight="bold"),
+            command=self._stack_windows,
+        ).pack(side="left", padx=2)
 
     def _build_log_panel(self):
         panel = CompactCard(self, height=96)
@@ -908,7 +923,7 @@ class LauncherApp(ctk.CTk):
                 "OPTIONS",
                 f"{BOSS_LABELS.get(profile.selected_boss, profile.selected_boss)} • {size}",
             )
-            self._arrange_windows()
+            self._apply_window_layout()
         except (ValueError, OSError) as exc:
             messagebox.showerror("Profile options", str(exc), parent=self)
             self._refresh()
@@ -1291,9 +1306,7 @@ class LauncherApp(ctk.CTk):
     # WINDOW LAYOUT
     # ------------------------------------------------------------------
 
-    def _arrange_windows(self):
-        import win32api
-        import win32con
+    def _window_items(self, include_reveal=False):
         import win32gui
 
         items = []
@@ -1305,27 +1318,62 @@ class LauncherApp(ctk.CTk):
             if not hwnd or not win32gui.IsWindow(hwnd):
                 continue
 
-            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-            items.append((hwnd, right - left, bottom - top))
+            left, top, right, bottom = (
+                win32gui.GetWindowRect(hwnd)
+            )
 
-        if not items:
-            return
+            width = right - left
+            height = bottom - top
+
+            if include_reveal:
+                reveal = boss_scan_reveal_height(
+                    hwnd
+                )
+                items.append(
+                    (
+                        hwnd,
+                        width,
+                        height,
+                        reveal,
+                    )
+                )
+            else:
+                items.append(
+                    (
+                        hwnd,
+                        width,
+                        height,
+                    )
+                )
+
+        return items
+
+    @staticmethod
+    def _working_area(hwnd):
+        import win32api
+        import win32con
 
         monitor = win32api.MonitorFromWindow(
-            items[0][0],
+            hwnd,
             win32con.MONITOR_DEFAULTTONEAREST,
         )
-        left, top, right, bottom = win32api.GetMonitorInfo(monitor)["Work"]
-
-        placements = arrange_windows(
-            items,
-            (
-                left,
-                top,
-                right - left,
-                bottom - top,
-            ),
+        left, top, right, bottom = (
+            win32api.GetMonitorInfo(
+                monitor
+            )["Work"]
         )
+
+        return (
+            left,
+            top,
+            right - left,
+            bottom - top,
+        )
+
+    @staticmethod
+    def _move_placements(placements):
+        import win32con
+        import win32gui
 
         for place in placements:
             if not win32gui.IsWindow(place.hwnd):
@@ -1338,8 +1386,39 @@ class LauncherApp(ctk.CTk):
                 place.y,
                 0,
                 0,
-                win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
+                win32con.SWP_NOSIZE
+                | win32con.SWP_NOACTIVATE,
             )
+
+    def _arrange_windows(self, remember=True):
+        if remember:
+            self.window_layout_mode = "arrange"
+
+        clear_boss_stack_order()
+
+        items = self._window_items(
+            include_reveal=False,
+        )
+
+        if not items:
+            return
+
+        working_area = self._working_area(
+            items[0][0]
+        )
+
+        placements = arrange_windows(
+            items,
+            working_area,
+        )
+
+        self._move_placements(
+            placements
+        )
+
+        left, top, width, height = working_area
+        right = left + width
+        bottom = top + height
 
         if any(
             place.overlap
@@ -1351,6 +1430,60 @@ class LauncherApp(ctk.CTk):
                 "App",
                 "WARN",
                 "Không đủ diện tích để xếp tất cả cửa sổ không chồng lấn",
+            )
+
+    def _stack_windows(self, remember=True):
+        if remember:
+            self.window_layout_mode = "stack"
+
+        items = self._window_items(
+            include_reveal=True,
+        )
+
+        if not items:
+            clear_boss_stack_order()
+            return
+
+        working_area = self._working_area(
+            items[0][0]
+        )
+
+        placements = stack_windows_for_boss(
+            items,
+            working_area,
+        )
+
+        # Move in back-to-front order. Every following window covers the
+        # lower area of the previous window while leaving its boss strip.
+        self._move_placements(
+            placements
+        )
+
+        set_boss_stack_order(
+            [
+                place.hwnd
+                for place in placements
+            ]
+        )
+
+        if any(
+            place.overlap
+            for place in placements
+        ):
+            self._log(
+                "App",
+                "WARN",
+                "Không đủ diện tích cho toàn bộ cụm chồng; một số cửa sổ có thể tràn màn hình",
+            )
+
+    def _apply_window_layout(self):
+        if self.window_layout_mode == "stack":
+            self._stack_windows(
+                remember=False,
+            )
+        else:
+            self._arrange_windows(
+                remember=False,
             )
 
     # ------------------------------------------------------------------
@@ -1467,7 +1600,7 @@ class LauncherApp(ctk.CTk):
             "WAITING_GAME",
             "CONFIRMING_IN_GAME",
         ):
-            self._arrange_windows()
+            self._apply_window_layout()
 
     def _worker_error(self, profile_id, exc):
         self._apply_runtime_status(
@@ -1491,6 +1624,8 @@ class LauncherApp(ctk.CTk):
         self._log(profile_id, "ERROR", str(exc))
 
     def _close(self):
+        clear_boss_stack_order()
+
         if self._log_flush_after_id is not None:
             try:
                 self.after_cancel(
