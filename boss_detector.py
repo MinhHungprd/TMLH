@@ -49,7 +49,15 @@ class BossDetector:
         return glyphs
     @staticmethod
     def is_alive(text: str) -> bool:
-        return bool(re.search(r"[0-9]", text or ""))
+        digits = re.sub(
+            r"\D",
+            "",
+            text or "",
+        )
+
+        # Một ký tự số đơn lẻ rất dễ là OCR noise.
+        # HP boss thực tế phải chứa nhiều chữ số.
+        return len(digits) >= 3
 
     def update_dead_streak(self, text: str) -> bool:
         if self.is_alive(text):
@@ -158,21 +166,22 @@ class BossDetector:
         normalized = normalize_to_base(raw)
 
         x, y, w, h = BOSS_HP
-
         roi = normalized[
             y:y + h,
             x:x + w
         ]
-        visual_glyphs = self.count_visual_glyphs(
-            roi
-        )
 
-        visual_alive = visual_glyphs >= 3
         if roi.size == 0:
             raise RuntimeError(
                 "Boss HP ROI is outside "
                 "game client area"
             )
+
+        visual_glyphs = self.count_visual_glyphs(
+            roi
+        )
+
+        visual_alive = visual_glyphs >= 3
 
         # 66x22 -> 264x88.
         upscaled = cv2.resize(
@@ -245,7 +254,7 @@ class BossDetector:
         debug_dir = None
 
         # OCR fail -> lưu ảnh để kiểm tra.
-        if not alive:
+        if not alive and not visual_alive:
             debug_dir = self._save_debug(
                 context,
                 normalized,
@@ -275,15 +284,13 @@ class BossDetector:
             "text": chosen_text,
             "alive": alive,
             "attempts": attempts,
-
-            # thêm:
             "visual_glyphs": visual_glyphs,
             "visual_alive": visual_alive,
-
             "debug_dir": (
                 str(debug_dir)
                 if debug_dir
                 else None
             ),
         }
+
         return chosen_text

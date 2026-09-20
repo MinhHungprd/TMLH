@@ -22,12 +22,43 @@ class InputManager:
         self.click = click or self._physical_click
 
     @staticmethod
-    def _physical_click(hwnd, x, y):
-        sx, sy = win32gui.ClientToScreen(hwnd, (x, y))
-        win32gui.SetForegroundWindow(hwnd)
-        win32api.SetCursorPos((sx, sy))
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0)
+    def _physical_click(
+        hwnd,
+        x,
+        y,
+    ):
+        sx, sy = win32gui.ClientToScreen(
+            hwnd,
+            (x, y),
+        )
+
+        # Windows có thể từ chối foreground
+        # nếu process hiện tại không có quyền
+        # giành focus.
+        #
+        # Không để lỗi này giết toàn worker.
+        try:
+            win32gui.SetForegroundWindow(
+                hwnd
+            )
+        except Exception:
+            pass
+
+        win32api.SetCursorPos(
+            (sx, sy)
+        )
+
+        win32api.mouse_event(
+            win32con.MOUSEEVENTF_LEFTDOWN,
+            0,
+            0,
+        )
+
+        win32api.mouse_event(
+            win32con.MOUSEEVENTF_LEFTUP,
+            0,
+            0,
+        )
 
     def click_center(self, hwnd, coordinates, stop_event=None, expected_pid=None):
         while not GlobalInputLock._lock.acquire(timeout=0.1):

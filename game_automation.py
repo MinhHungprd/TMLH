@@ -8,9 +8,16 @@ import win32gui
 import win32process
 
 from automation_constants import (
-    BOSS_ENTER_WAIT, BOSS_OCR_INTERVAL, BOSS_RESPAWN_WAIT,
-    GAME_START_WAIT, IN_GAME_CONFIRM_SECONDS,
+    BOSS_DEAD_CONFIRM_COUNT,
+    BOSS_DEAD_CONFIRM_SECONDS,
+    BOSS_ENTER_WAIT,
+    BOSS_FIRST_ALIVE_TIMEOUT,
+    BOSS_OCR_INTERVAL,
+    BOSS_RESPAWN_WAIT,
+    GAME_START_WAIT,
+    IN_GAME_CONFIRM_SECONDS,
 )
+
 from boss.enter_boss import (
     enter_boss,
     exit_boss,
@@ -28,10 +35,8 @@ from window_manager import (
     acquire_profile_window,
     ensure_client_size,
     resize_client,
-    wait_for_remote_port,
 )
-GAME_SERVER_IP = "14.225.213.205"
-GAMEPLAY_PORT = 1002
+
 def interruptible_wait(seconds, stop_event):
     return stop_event.wait(seconds)
 
@@ -315,34 +320,6 @@ class AutomationWorker:
                     return
 
                 initial_in_game = True
-                if self._halted():
-                    return
-
-                self.lifecycle.resize(self.context)
-
-                if launched:
-                    self._state("WAITING_STARTUP")
-
-                    # Không được restore account của profile tiếp theo
-                    # cho tới khi profile này thực sự vào gameplay.
-                    ready = wait_for_remote_port(
-                        pid,
-                        GAME_SERVER_IP,
-                        GAMEPLAY_PORT,
-                        self.context.stop_event,
-                        timeout=35.0,
-                    )
-
-                    if self._halted():
-                        return
-
-                    if not ready:
-                        raise RuntimeError(
-                            f"{self.context.profile_name}: "
-                            f"không vào được ingame socket "
-                            f"{GAME_SERVER_IP}:{GAMEPLAY_PORT} "
-                            f"sau khi restore account"
-                        )
             while not self._halted():
 
                 # Lần đầu đã được _ensure_in_game()
@@ -372,20 +349,238 @@ class AutomationWorker:
                 if self.wait(BOSS_ENTER_WAIT, self.context.stop_event):
                     break
                 self.context.boss_dead_streak = 0
+
+                # Boss chưa được xác nhận sống.
+                boss_seen_alive = False
+
+                # Thời điểm đầu tiên xác nhận boss sống / bắt đầu detector.
+                boss_check_started_at = self.now()
+
+                # Lần gần nhất detector xác nhận boss còn sống.
+                last_alive_at = None
+
+                # Thời điểm bắt đầu chuỗi fail liên tục.
+                dead_candidate_since = None
+
                 self._state("CHECKING_BOSS")
+
                 while not self._halted():
-                    if not self.lifecycle.valid(self.context):
-                        raise RuntimeError("Game window closed or changed owner")
-                    resized = self.lifecycle.ensure_size(self.context)
+
+                    if not self.lifecycle.valid(
+                        self.context
+                    ):
+                        raise RuntimeError(
+                            "Game window closed or changed owner"
+                        )
+
+                    resized = self.lifecycle.ensure_size(
+                        self.context
+                    )
 
                     if resized:
-                        if self.wait(0.15, self.context.stop_event):
+                        if self.wait(
+                            0.15,
+                            self.context.stop_event,
+                        ):
                             break
+
+                    # =====================================
+                    # OCR đúng 1 lần trong mỗi chu kỳ.
+                    # =====================================
 
                     text = self.boss_detector.read_hp(
                         self.context
                     )
 
+                    if self._halted():
+                        break
+
+                    debug = getattr(
+                        self.boss_detector,
+                        "last_debug",
+                        {},
+                    )
+
+                    ocr_alive = (
+                        self.boss_detector.is_alive(
+                            text
+                        )
+                    )
+
+                    visual_alive = bool(
+                        debug.get(
+                            "visual_alive",
+                            False,
+                        )
+                    )
+
+                    # Conservative rule:
+                    #
+                    # Chỉ cần một trong hai detector
+                    # xác nhận còn HP thì boss vẫn sống.
+                    alive = (
+                        ocr_alive
+                        or visual_alive
+                    )
+
+                    now = self.now()
+
+                    # =====================================
+                    # ALIVE
+                    # =====================================
+
+                    if alive:
+
+                        boss_seen_alive = True
+
+                        last_alive_at = now
+
+                        dead_candidate_since = None
+
+                        self.context.boss_dead_streak = 0
+
+                        self._state(
+                            "BOSS_ALIVE"
+                        )
+
+                    # =====================================
+                    # UNKNOWN / CÓ THỂ DEAD
+                    # =====================================
+
+                    else:
+
+                        # Quan trọng:
+                        #
+                        # Chưa từng detect boss sống thì
+                        # tuyệt đối không được tự EXIT map.
+                        if not boss_seen_alive:
+
+                            self.context.boss_dead_streak = 0
+
+                            dead_candidate_since = None
+
+                            self._state(
+                                "BOSS_WAITING_FIRST_CONFIRM"
+                            )
+
+                            # Nếu detector 20s vẫn chưa từng
+                            # thấy boss thì coi là detector lỗi.
+                            #
+                            # Raise ERROR nhưng KHÔNG exit_boss(),
+                            # tránh tự đá nhân vật ra khỏi map.
+                            if (
+                                now - boss_check_started_at
+                                >= BOSS_FIRST_ALIVE_TIMEOUT
+                            ):
+                                raise RuntimeError(
+                                    (
+                                        f"{self.context.profile_name}: "
+                                        "boss HP chưa từng được xác nhận "
+                                        f"trong {BOSS_FIRST_ALIVE_TIMEOUT:.0f}s; "
+                                        "dừng automation để tránh out map nhầm"
+                                    )
+                                )
+
+                        else:
+
+                            # Đây là frame fail đầu tiên.
+                            if dead_candidate_since is None:
+                                dead_candidate_since = now
+
+                            self.context.boss_dead_streak += 1
+
+                            dead_for = (
+                                now
+                                - dead_candidate_since
+                            )
+
+                            since_alive = (
+                                now
+                                - last_alive_at
+                                if last_alive_at is not None
+                                else 0.0
+                            )
+
+                            confirmed_dead = (
+                                self.context.boss_dead_streak
+                                >= BOSS_DEAD_CONFIRM_COUNT
+                                and dead_for
+                                >= BOSS_DEAD_CONFIRM_SECONDS
+                                and since_alive
+                                >= BOSS_DEAD_CONFIRM_SECONDS
+                            )
+
+                            if confirmed_dead:
+
+                                self._state(
+                                    "BOSS_DEAD"
+                                )
+
+                                # Log bằng chứng trước khi exit.
+                                self.on_log(
+                                    (
+                                        "DEAD CONFIRMED "
+                                        f"streak="
+                                        f"{self.context.boss_dead_streak} "
+                                        f"dead_for={dead_for:.1f}s "
+                                        f"since_alive={since_alive:.1f}s"
+                                    )
+                                )
+
+                                break
+
+                            self._state(
+                                "BOSS_DEAD_CONFIRMING"
+                            )
+
+                    # =====================================
+                    # LOG
+                    # =====================================
+
+                    digits = "".join(
+                        char
+                        for char in (text or "")
+                        if char.isdigit()
+                    )
+
+                    dead_for = (
+                        0.0
+                        if dead_candidate_since is None
+                        else now - dead_candidate_since
+                    )
+
+                    since_alive = (
+                        0.0
+                        if last_alive_at is None
+                        else now - last_alive_at
+                    )
+
+                    self.on_log(
+                        (
+                            f"text={text!r} "
+                            f"digits={digits!r} "
+                            f"ocr_alive={ocr_alive} "
+                            f"visual_glyphs="
+                            f"{debug.get('visual_glyphs')} "
+                            f"visual_alive={visual_alive} "
+                            f"final_alive={alive} "
+                            f"seen_alive={boss_seen_alive} "
+                            f"dead_streak="
+                            f"{self.context.boss_dead_streak} "
+                            f"dead_for={dead_for:.1f}s "
+                            f"since_alive={since_alive:.1f}s"
+                        )
+                    )
+
+                    # =====================================
+                    # BẮT BUỘC WAIT 2 GIÂY
+                    # =====================================
+
+                    if self.wait(
+                        BOSS_OCR_INTERVAL,
+                        self.context.stop_event,
+                    ):
+                        break
                     if self._halted():
                         break
 
