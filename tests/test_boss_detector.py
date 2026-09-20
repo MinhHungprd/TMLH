@@ -86,6 +86,44 @@ def test_visual_alive_skips_ocr_on_roi_capture_fast_path():
     assert detector.last_debug["attempts"] == []
 
 
+def test_identical_roi_reuses_previous_ocr_result():
+    roi = np.zeros((22, 66), dtype=np.uint8)
+    calls = []
+
+    class OCR:
+        def read(self, image):
+            calls.append(image.shape)
+            return "HP 128"
+
+    detector = BossDetector(
+        ocr=OCR(),
+        capture=lambda hwnd: np.zeros(
+            (484, 860),
+            dtype=np.uint8,
+        ),
+        roi_capture=lambda hwnd, base_roi: roi.copy(),
+    )
+
+    context = type(
+        "Context",
+        (),
+        {
+            "window_handle": 7,
+            "window_width": 860,
+            "window_height": 484,
+            "profile_id": "p1",
+        },
+    )()
+
+    assert detector.read_hp(context) == "HP 128"
+    assert detector.read_hp(context) == "HP 128"
+
+    # First scan OCRs once because the first grayscale attempt succeeds.
+    # Second scan is byte-identical and should use the cached OCR result.
+    assert calls == [(88, 264)]
+    assert detector.last_debug["chosen"] == "cache"
+
+
 def test_ocr_service_reports_missing_windows_executable():
     from ocr_service import OcrConfigurationError, OcrService
 
