@@ -32,7 +32,7 @@ class StatusBadge(ctk.CTkLabel):
             corner_radius=8,
             font=ctk.CTkFont(size=7, weight="bold"),
             height=18,
-            width=54,
+            width=52,
             **kwargs,
         )
 
@@ -101,13 +101,13 @@ class ProfileRow(ctk.CTkFrame):
             font=ctk.CTkFont(size=9, weight="bold"),
             anchor="w",
         )
-        name.grid(row=0, column=1, sticky="ew", padx=5)
+        name.grid(row=0, column=1, sticky="ew", padx=2)
         name.bind("<Button-1>", lambda _event: on_focus(profile.profile_id))
 
         StatusBadge(self, runtime_status).grid(
             row=0,
             column=2,
-            padx=2,
+            padx=1,
             pady=8,
             sticky="w",
         )
@@ -116,7 +116,7 @@ class ProfileRow(ctk.CTkFrame):
         self.boss_combo = ctk.CTkComboBox(
             self,
             values=list(boss_values),
-            width=84,
+            width=80,
             height=24,
             font=ctk.CTkFont(size=8),
             dropdown_font=ctk.CTkFont(size=8),
@@ -130,12 +130,12 @@ class ProfileRow(ctk.CTkFrame):
             command=lambda _value: self._changed(),
         )
         self.boss_combo.set(boss_label)
-        self.boss_combo.grid(row=0, column=3, padx=4)
+        self.boss_combo.grid(row=0, column=3, padx=2)
 
         self.size_combo = ctk.CTkComboBox(
             self,
             values=list(size_values),
-            width=70,
+            width=66,
             height=24,
             font=ctk.CTkFont(size=8),
             dropdown_font=ctk.CTkFont(size=8),
@@ -149,15 +149,15 @@ class ProfileRow(ctk.CTkFrame):
             command=lambda _value: self._changed(),
         )
         self.size_combo.set(f"{profile.window_width}x{profile.window_height}")
-        self.size_combo.grid(row=0, column=4, padx=4)
+        self.size_combo.grid(row=0, column=4, padx=2)
 
         actions = ctk.CTkFrame(self, fg_color="transparent")
         actions.grid(row=0, column=5, padx=(1, 3), sticky="e")
 
         self._button(actions, "▶", COLORS["blue"], lambda: on_start(profile.profile_id)).pack(side="left", padx=1)
-        self._button(actions, "■", COLORS["red"], lambda: on_stop(profile.profile_id)).pack(side="left", padx=2)
-        self._button(actions, "✎", COLORS["purple"], lambda: on_edit(profile.profile_id)).pack(side="left", padx=2)
-        self._button(actions, "×", COLORS["surface_soft"], lambda: on_delete(profile.profile_id)).pack(side="left", padx=2)
+        self._button(actions, "■", COLORS["red"], lambda: on_stop(profile.profile_id)).pack(side="left", padx=1)
+        self._button(actions, "✎", COLORS["purple"], lambda: on_edit(profile.profile_id)).pack(side="left", padx=1)
+        self._button(actions, "×", COLORS["surface_soft"], lambda: on_delete(profile.profile_id)).pack(side="left", padx=1)
 
         self.bind("<Button-1>", lambda _event: on_focus(profile.profile_id))
 
