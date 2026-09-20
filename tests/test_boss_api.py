@@ -18,11 +18,48 @@ def test_exit_boss_attaches_to_supplied_pid():
 
 def test_send_packet_attaches_only_to_exact_pid():
     session = Mock()
-    session.create_script.return_value.exports_sync.ready.return_value = True
-    session.create_script.return_value.exports_sync.enter.return_value = 14
+
+    script = session.create_script.return_value
+    script.exports_sync.ready.return_value = True
+    script.exports_sync.enter.return_value = 14
+
     process = Mock(pid=42)
-    with patch.object(api.psutil, "Process", return_value=process), patch.object(api, "has_game_socket", return_value=True), patch.object(api.frida, "attach", return_value=session) as attach, patch.object(api.psutil, "process_iter", side_effect=AssertionError("global scan")):
-        assert api.send_packet(42, api.enter_boss_hex(api.BOSSES["trom_cho"]), 1) == 14
+
+    remote = {
+        "ip": "14.225.213.205",
+        "port": 8001,
+    }
+
+    with (
+        patch.object(
+            api.psutil,
+            "Process",
+            return_value=process,
+        ),
+        patch.object(
+            api,
+            "discover_game_remote",
+            return_value=remote,
+        ),
+        patch.object(
+            api.frida,
+            "attach",
+            return_value=session,
+        ) as attach,
+        patch.object(
+            api.psutil,
+            "process_iter",
+            side_effect=AssertionError("global scan"),
+        ),
+    ):
+        result = api.send_packet(
+            42,
+            api.enter_boss_hex(api.BOSSES["trom_cho"]),
+            1,
+        )
+
+    assert result == 14
+
     attach.assert_called_once_with(42)
     session.detach.assert_called_once()
 
@@ -37,3 +74,153 @@ def test_cli_requires_pid_before_any_boss_command():
             else:
                 raise AssertionError(f"PID was not required for {command}")
             send.assert_not_called()
+def make_connection(ip, port, status=None):
+    connection = Mock()
+
+    connection.raddr.ip = ip
+    connection.raddr.port = port
+    connection.status = status or api.psutil.CONN_ESTABLISHED
+
+    return connection
+
+
+def test_discover_game_remote_port_1001():
+    process = Mock(pid=101)
+
+    process.net_connections.return_value = [
+        make_connection(
+            "14.225.213.205",
+            1001,
+        ),
+    ]
+
+    assert api.discover_game_remote(process) == {
+        "ip": "14.225.213.205",
+        "port": 1001,
+    }
+
+
+def test_discover_game_remote_port_8001():
+    process = Mock(pid=102)
+
+    process.net_connections.return_value = [
+        make_connection(
+            "14.225.213.205",
+            8001,
+        ),
+    ]
+
+    assert api.discover_game_remote(process) == {
+        "ip": "14.225.213.205",
+        "port": 8001,
+    }
+
+
+def test_discover_game_remote_port_1002():
+    process = Mock(pid=103)
+
+    process.net_connections.return_value = [
+        make_connection(
+            "14.225.213.205",
+            1002,
+        ),
+    ]
+
+    assert api.discover_game_remote(process) == {
+        "ip": "14.225.213.205",
+        "port": 1002,
+    }
+
+
+def test_discover_game_remote_ignores_other_servers():
+    process = Mock(pid=104)
+
+    process.net_connections.return_value = [
+        make_connection(
+            "171.244.128.12",
+            443,
+        ),
+        make_connection(
+            "14.225.213.205",
+            8001,
+        ),
+    ]
+
+    assert api.discover_game_remote(process) == {
+        "ip": "14.225.213.205",
+        "port": 8001,
+    }
+
+
+def test_discover_game_remote_missing():
+    process = Mock(pid=105)
+
+    process.net_connections.return_value = [
+        make_connection(
+            "171.244.128.12",
+            443,
+        ),
+    ]
+
+    try:
+        api.discover_game_remote(process)
+    except RuntimeError as exc:
+        assert "105" in str(exc)
+        assert "14.225.213.205" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected RuntimeError"
+        )
+
+
+def test_discover_game_remote_rejects_ambiguous_ports():
+    process = Mock(pid=106)
+
+    process.net_connections.return_value = [
+        make_connection(
+            "14.225.213.205",
+            1001,
+        ),
+        make_connection(
+            "14.225.213.205",
+            8001,
+        ),
+    ]
+
+    try:
+        api.discover_game_remote(process)
+    except RuntimeError as exc:
+        message = str(exc)
+
+        assert "1001" in message
+        assert "8001" in message
+    else:
+        raise AssertionError(
+            "Expected RuntimeError"
+        )
+
+
+def test_two_profiles_can_resolve_different_ports():
+    hung = Mock(pid=26420)
+    narly = Mock(pid=30000)
+
+    hung.net_connections.return_value = [
+        make_connection(
+            "14.225.213.205",
+            1001,
+        ),
+    ]
+
+    narly.net_connections.return_value = [
+        make_connection(
+            "171.244.128.12",
+            443,
+        ),
+        make_connection(
+            "14.225.213.205",
+            8001,
+        ),
+    ]
+
+    assert api.discover_game_remote(hung)["port"] == 1001
+    assert api.discover_game_remote(narly)["port"] == 8001

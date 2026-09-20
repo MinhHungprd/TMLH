@@ -22,7 +22,7 @@ import frida
 import psutil
 
 
-REMOTE = {"ip": "14.225.213.205", "port": 1002}
+GAME_SERVER_IP = "14.225.213.205"
 
 ENTER_GROUP = 11
 ENTER_OPCODE = 141          # 0x8d
@@ -55,39 +55,109 @@ def parse_packet(hexstr: str):
     return plen, group, opcode, hexstr[24:]
 
 
-def has_game_socket(process: psutil.Process) -> bool:
-    return any(c.raddr and c.status == psutil.CONN_ESTABLISHED
-               and c.raddr.ip == REMOTE["ip"]
-               and c.raddr.port == REMOTE["port"]
-               for c in process.net_connections(kind="tcp"))
+def discover_game_remote(process: psutil.Process) -> dict:
+    """
+    Tìm gameplay endpoint của đúng process/profile hiện tại.
+
+    Không hard-code port vì các profile/session có thể dùng:
+    - 1001
+    - 1002
+    - 8001
+    - hoặc port khác
+
+    Chỉ xét TCP ESTABLISHED tới GAME_SERVER_IP.
+    """
+
+    endpoints = set()
+
+    for connection in process.net_connections(kind="tcp"):
+        if not connection.raddr:
+            continue
+
+        if connection.status != psutil.CONN_ESTABLISHED:
+            continue
+
+        if connection.raddr.ip != GAME_SERVER_IP:
+            continue
+
+        endpoints.add(
+            (
+                connection.raddr.ip,
+                connection.raddr.port,
+            )
+        )
+
+    if not endpoints:
+        raise RuntimeError(
+            f"PID {process.pid} không có kết nối TCP ESTABLISHED "
+            f"tới game server {GAME_SERVER_IP}"
+        )
+
+    if len(endpoints) > 1:
+        candidates = ", ".join(
+            f"{ip}:{port}"
+            for ip, port in sorted(endpoints)
+        )
+
+        raise RuntimeError(
+            f"PID {process.pid} có nhiều game socket khả nghi: "
+            f"{candidates}. Không thể chọn an toàn."
+        )
+
+    ip, port = next(iter(endpoints))
+
+    return {
+        "ip": ip,
+        "port": port,
+    }
 
 
 # ---------- Gửi ----------
 def send_packet(pid: int, packet: str, wait: float, stop_event=None) -> int:
     if stop_event is not None and stop_event.is_set():
         raise RuntimeError("Boss command cancelled")
+
     process = psutil.Process(pid)
-    if not has_game_socket(process):
-        raise RuntimeError("Game chưa kết nối tới server port 1002")
-    source = Path(__file__).with_suffix(".js").read_text(encoding="utf-8").replace(
-        "__TARGET__", json.dumps(REMOTE), 1
+
+    remote = discover_game_remote(process)
+
+    source = (
+        Path(__file__)
+        .with_suffix(".js")
+        .read_text(encoding="utf-8")
+        .replace("__TARGET__", json.dumps(remote), 1)
     )
+
     session = frida.attach(process.pid)
+
     try:
         script = session.create_script(source)
         script.load()
+
         deadline = time.monotonic() + wait
-        while time.monotonic() < deadline and not script.exports_sync.ready():
+
+        while (
+            time.monotonic() < deadline
+            and not script.exports_sync.ready()
+        ):
             if stop_event is not None:
                 if stop_event.wait(0.1):
                     raise RuntimeError("Boss command cancelled")
             else:
                 time.sleep(0.1)
+
         if not script.exports_sync.ready():
-            raise RuntimeError("Không thấy traffic game port 1002")
+            raise RuntimeError(
+                f"Không thấy traffic game tới "
+                f"{remote['ip']}:{remote['port']} "
+                f"trên PID {process.pid}"
+            )
+
         if stop_event is not None and stop_event.is_set():
             raise RuntimeError("Boss command cancelled")
+
         return script.exports_sync.enter(packet)
+
     finally:
         session.detach()
 
