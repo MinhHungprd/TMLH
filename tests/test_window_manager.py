@@ -38,3 +38,24 @@ def test_resolver_does_not_treat_launcher_as_actual_game():
     launcher = SimpleNamespace(pid=10, children=lambda recursive=False: [])
     with patch("window_manager.psutil.Process", return_value=launcher):
         assert resolve_actual_game_pid(10, Path("C:/profiles/P")) is None
+
+
+
+def test_set_profile_window_title_uses_profile_name():
+    from window_manager import set_profile_window_title
+
+    with patch(
+        "window_manager.win32gui.IsWindow",
+        return_value=True,
+    ), patch(
+        "window_manager.win32gui.SetWindowText"
+    ) as set_text:
+        set_profile_window_title(
+            123,
+            "Acc 01",
+        )
+
+    set_text.assert_called_once_with(
+        123,
+        "Acc 01",
+    )
