@@ -64,7 +64,7 @@ class ProfileRow(ctk.CTkFrame):
     ):
         super().__init__(
             master,
-            height=50,
+            height=40,
             fg_color=COLORS["surface_alt"],
             border_width=2 if focused else 1,
             border_color=COLORS["cyan"] if focused else COLORS["border"],
@@ -92,13 +92,13 @@ class ProfileRow(ctk.CTkFrame):
             fg_color=COLORS["cyan"],
             hover_color=COLORS["blue_hover"],
             border_color=COLORS["border_bright"],
-        ).grid(row=0, column=0, padx=(9, 2), pady=14)
+        ).grid(row=0, column=0, padx=(6, 1), pady=10)
 
         name = ctk.CTkLabel(
             self,
             text=profile.profile_name,
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(size=9, weight="bold"),
             anchor="w",
         )
         name.grid(row=0, column=1, sticky="ew", padx=5)
@@ -152,7 +152,7 @@ class ProfileRow(ctk.CTkFrame):
         self.size_combo.grid(row=0, column=4, padx=4)
 
         actions = ctk.CTkFrame(self, fg_color="transparent")
-        actions.grid(row=0, column=5, padx=(4, 7), sticky="e")
+        actions.grid(row=0, column=5, padx=(2, 4), sticky="e")
 
         self._button(actions, "▶", COLORS["blue"], lambda: on_start(profile.profile_id)).pack(side="left", padx=2)
         self._button(actions, "■", COLORS["red"], lambda: on_stop(profile.profile_id)).pack(side="left", padx=2)
@@ -172,7 +172,7 @@ class ProfileRow(ctk.CTkFrame):
             fg_color=color,
             hover_color=COLORS["border_bright"],
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(size=9, weight="bold"),
             command=command,
         )
 
@@ -200,7 +200,7 @@ class EditProfileDialog(ctk.CTkToplevel):
         self.on_save = on_save
 
         self.title("Sửa profile")
-        self.geometry("390x300")
+        self.geometry("360x280")
         self.resizable(False, False)
         self.configure(fg_color=COLORS["bg"])
         self.transient(master)
