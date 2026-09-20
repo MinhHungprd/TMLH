@@ -66,3 +66,30 @@ def test_explicit_repair_restores_missing_launcher_preserving_extra_data(tmp_pat
     manager.repair_profile(profile, source)
     manager.check_clone(profile)
     assert (clone / "player-save.bin").read_bytes() == b"session"
+
+
+
+def test_rename_and_delete_profile_clone(tmp_path):
+    source = tmp_path / "source-crud"
+    source.mkdir()
+    (source / "ThienMenhLacHong_Launcher.exe").write_bytes(b"exe")
+    (source / "data.bin").write_bytes(b"data")
+
+    manager = ProfileManager(tmp_path / "bot-crud")
+    profile = manager.create_profile("Old Name", source)
+    old_path = Path(profile.game_path)
+
+    renamed = manager.rename_profile(
+        profile,
+        "New Name",
+        [],
+    )
+
+    new_path = Path(renamed.game_path)
+    assert renamed.profile_id == "New Name"
+    assert renamed.profile_name == "New Name"
+    assert old_path.exists() is False
+    assert new_path.joinpath("data.bin").read_bytes() == b"data"
+
+    manager.delete_profile(renamed)
+    assert new_path.exists() is False
