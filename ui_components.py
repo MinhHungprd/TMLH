@@ -30,9 +30,9 @@ class StatusBadge(ctk.CTkLabel):
             text_color=fg,
             fg_color=bg,
             corner_radius=8,
-            font=ctk.CTkFont(size=10, weight="bold"),
-            height=24,
-            width=92,
+            font=ctk.CTkFont(size=8, weight="bold"),
+            height=20,
+            width=68,
             **kwargs,
         )
 
@@ -75,7 +75,7 @@ class ProfileRow(ctk.CTkFrame):
         self.on_change = on_change
 
         # Fits comfortably in an ~800 px window.
-        widths = (32, 132, 104, 118, 98, 150)
+        widths = (24, 86, 72, 78, 62, 112)
         for index, width in enumerate(widths):
             self.grid_columnconfigure(index, minsize=width, weight=1 if index == 1 else 0)
 
@@ -85,14 +85,14 @@ class ProfileRow(ctk.CTkFrame):
             text="",
             variable=self.check_var,
             command=lambda: on_toggle(profile.profile_id, self.check_var.get()),
-            width=20,
-            checkbox_width=18,
-            checkbox_height=18,
+            width=16,
+            checkbox_width=16,
+            checkbox_height=16,
             corner_radius=5,
             fg_color=COLORS["cyan"],
             hover_color=COLORS["blue_hover"],
             border_color=COLORS["border_bright"],
-        ).grid(row=0, column=0, padx=(6, 1), pady=10)
+        ).grid(row=0, column=0, padx=(5, 1), pady=9)
 
         name = ctk.CTkLabel(
             self,
@@ -107,8 +107,8 @@ class ProfileRow(ctk.CTkFrame):
         StatusBadge(self, runtime_status).grid(
             row=0,
             column=2,
-            padx=4,
-            pady=12,
+            padx=2,
+            pady=9,
             sticky="w",
         )
 
@@ -116,10 +116,10 @@ class ProfileRow(ctk.CTkFrame):
         self.boss_combo = ctk.CTkComboBox(
             self,
             values=list(boss_values),
-            width=112,
-            height=29,
-            font=ctk.CTkFont(size=10),
-            dropdown_font=ctk.CTkFont(size=10),
+            width=74,
+            height=24,
+            font=ctk.CTkFont(size=8),
+            dropdown_font=ctk.CTkFont(size=8),
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             button_color=COLORS["surface_soft"],
@@ -135,10 +135,10 @@ class ProfileRow(ctk.CTkFrame):
         self.size_combo = ctk.CTkComboBox(
             self,
             values=list(size_values),
-            width=92,
-            height=29,
-            font=ctk.CTkFont(size=10),
-            dropdown_font=ctk.CTkFont(size=10),
+            width=58,
+            height=24,
+            font=ctk.CTkFont(size=8),
+            dropdown_font=ctk.CTkFont(size=8),
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             button_color=COLORS["surface_soft"],
@@ -166,8 +166,8 @@ class ProfileRow(ctk.CTkFrame):
         return ctk.CTkButton(
             master,
             text=text,
-            width=30,
-            height=29,
+            width=22,
+            height=24,
             corner_radius=7,
             fg_color=color,
             hover_color=COLORS["border_bright"],
