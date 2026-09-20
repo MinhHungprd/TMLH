@@ -227,7 +227,8 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             text=(
                 "Cấu hình TMLH được mã hóa bằng Windows DPAPI. "
                 "ProxiFyre bắt buộc lưu user/pass dạng plaintext "
-                "trong app-config.json của chính ProxiFyre."
+                "trong app-config.json của chính ProxiFyre. "
+                "Muốn tắt proxy: xóa hết các dòng rồi bấm Áp dụng."
             ),
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=8),
