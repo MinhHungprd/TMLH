@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 from dataclasses import replace
@@ -116,7 +117,12 @@ class ProfileManager:
         current = self._checked_destination(profile)
         target = profile_clone_path(self.bot_root, safe_name)
 
-        if target.exists():
+        same_location = (
+            os.path.normcase(str(current.absolute()))
+            == os.path.normcase(str(target.absolute()))
+        )
+
+        if target.exists() and not same_location:
             raise FileExistsError(target)
 
         target.parent.mkdir(parents=True, exist_ok=True)
