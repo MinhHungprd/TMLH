@@ -89,3 +89,32 @@ def test_failed_worker_can_restart_without_stop_event(tmp_path):
     assert not first.context.stop_event.is_set()
     assert model.start_selected(["P"]) == ["P"]
     assert model.workers["P"] is not first
+
+
+
+def test_edit_and_delete_profile_crud(tmp_path):
+    model = controller(tmp_path)
+    game = source(tmp_path)
+
+    profile = model.prepare_profile("Old", game)
+    model.manager.clone_profile(profile, game)
+
+    updated = model.edit_profile(
+        "Old",
+        "Renamed",
+        "ngao_op",
+        "480x270",
+    )
+
+    assert updated.profile_id == "Renamed"
+    assert updated.profile_name == "Renamed"
+    assert updated.selected_boss == "ngao_op"
+    assert (updated.window_width, updated.window_height) == (480, 270)
+    assert Path(updated.game_path).is_dir()
+    assert model.profile_store.load()[0].profile_id == "Renamed"
+
+    deleted = model.delete_profile("Renamed")
+    assert deleted.profile_name == "Renamed"
+    assert model.profiles == []
+    assert model.profile_store.load() == []
+    assert Path(updated.game_path).exists() is False
