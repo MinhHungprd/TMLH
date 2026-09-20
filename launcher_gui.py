@@ -443,7 +443,7 @@ class LauncherApp(ctk.CTk):
             text="👤 Profile",
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=10, weight="bold"),
-            width=72,
+            width=64,
             anchor="w",
         ).grid(row=0, column=0, padx=(10, 4), pady=7)
 
@@ -613,39 +613,45 @@ class LauncherApp(ctk.CTk):
         bar = CompactCard(self, height=42)
         bar.grid(row=4, column=0, sticky="ew", padx=8, pady=3)
         bar.grid_propagate(False)
-        bar.grid_columnconfigure((0, 1, 2), weight=1)
+        bar.grid_columnconfigure(0, weight=1)
+
+        actions = ctk.CTkFrame(bar, fg_color="transparent")
+        actions.grid(row=0, column=0, pady=8)
 
         ctk.CTkButton(
-            bar,
+            actions,
             text="▶ Start",
+            width=92,
             height=24,
             fg_color=COLORS["cyan"],
             hover_color=COLORS["blue"],
             text_color=COLORS["black"],
-            font=ctk.CTkFont(size=10, weight="bold"),
+            font=ctk.CTkFont(size=9, weight="bold"),
             command=self._start_selected,
-        ).grid(row=0, column=0, sticky="ew", padx=(8, 4), pady=8)
+        ).pack(side="left", padx=3)
 
         ctk.CTkButton(
-            bar,
+            actions,
             text="■ Stop",
+            width=82,
             height=24,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["red_hover"],
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=10, weight="bold"),
+            font=ctk.CTkFont(size=9, weight="bold"),
             command=self._stop_selected,
-        ).grid(row=0, column=1, sticky="ew", padx=4, pady=8)
+        ).pack(side="left", padx=3)
 
         ctk.CTkButton(
-            bar,
+            actions,
             text="▣ Xếp cửa sổ",
+            width=112,
             height=24,
             fg_color=COLORS["purple"],
             hover_color=COLORS["purple_hover"],
             font=ctk.CTkFont(size=9, weight="bold"),
             command=self._arrange_windows,
-        ).grid(row=0, column=2, sticky="ew", padx=(4, 8), pady=8)
+        ).pack(side="left", padx=3)
 
     def _build_log_panel(self):
         panel = CompactCard(self, height=96)
