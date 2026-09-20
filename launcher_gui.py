@@ -1110,6 +1110,7 @@ class LauncherApp(ctk.CTk):
                 _pid, _hwnd, launched = acquire_profile_window(
                     profile.game_path,
                     cancel,
+                    window_title=profile.profile_name,
                 )
                 set_window_topmost(_hwnd, True)
 
@@ -1161,6 +1162,7 @@ class LauncherApp(ctk.CTk):
                     _pid, _hwnd, launched = acquire_profile_window(
                         profile.game_path,
                         cancel,
+                        window_title=profile.profile_name,
                     )
                     set_window_topmost(_hwnd, True)
 
