@@ -1,7 +1,7 @@
 import numpy as np
 
 from automation_constants import SIGNAL_1, SIGNAL_2, SIGNAL_3
-from vision import ScaledAssetCache, roi_center, scale_roi
+from vision import ScaledAssetCache, normalize_roi_to_base, roi_center, scale_roi
 
 
 def test_scale_roi_reference_values():
@@ -17,3 +17,13 @@ def test_scaled_asset_cache_reuses_template():
     second = cache.get("asset__x795_y29_w29_h38.png", 320, 180)
     assert first.shape == (14, 11)
     assert first is second
+
+
+
+def test_normalize_roi_to_base_only_resizes_the_roi():
+    small = np.zeros((8, 25), dtype=np.uint8)
+    normalized = normalize_roi_to_base(
+        small,
+        (375, 8, 66, 22),
+    )
+    assert normalized.shape == (22, 66)
