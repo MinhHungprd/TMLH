@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import subprocess
 import threading
 import time
@@ -7,7 +8,13 @@ import psutil
 import win32con
 import win32gui
 import win32process
+
+from automation_constants import BASE_HEIGHT, BOSS_HP
 PROFILE_LAUNCH_LOCK = threading.Lock()
+
+_STACK_ORDER_LOCK = threading.RLock()
+_NON_BOSS_VISIBILITY_LOCK = threading.Lock()
+_BOSS_STACK_ORDER = ()
 
 def launch_profile(profile):
     path = Path(profile.game_path)
@@ -51,6 +58,168 @@ def find_window_for_pid(pid: int):
 
     win32gui.EnumWindows(callback, None)
     return found[0] if found else None
+
+
+def boss_scan_reveal_height(
+    hwnd: int,
+    padding: int = 4,
+) -> int:
+    """
+    Outer-window height that must remain visible so the boss HP ROI stays
+    fully exposed while windows are overlapped.
+    """
+    if not hwnd or not win32gui.IsWindow(hwnd):
+        raise ValueError(f"Invalid HWND: {hwnd}")
+
+    _left, outer_top, _right, outer_bottom = (
+        win32gui.GetWindowRect(hwnd)
+    )
+    _client_width, client_height = get_client_size(hwnd)
+
+    _x, base_y, _w, base_h = BOSS_HP
+    roi_y = round(
+        base_y * client_height / BASE_HEIGHT
+    )
+    roi_h = max(
+        1,
+        round(
+            base_h * client_height / BASE_HEIGHT
+        ),
+    )
+
+    _client_left, client_top = (
+        win32gui.ClientToScreen(
+            hwnd,
+            (0, 0),
+        )
+    )
+
+    reveal = (
+        client_top
+        - outer_top
+        + roi_y
+        + roi_h
+        + padding
+    )
+
+    return max(
+        1,
+        min(
+            reveal,
+            outer_bottom - outer_top,
+        ),
+    )
+
+
+def set_boss_stack_order(hwnds) -> None:
+    """Remember back-to-front stack order for temporary interaction raises."""
+    valid = tuple(
+        hwnd
+        for hwnd in hwnds
+        if hwnd and win32gui.IsWindow(hwnd)
+    )
+
+    with _STACK_ORDER_LOCK:
+        global _BOSS_STACK_ORDER
+        _BOSS_STACK_ORDER = valid
+
+
+def clear_boss_stack_order() -> None:
+    with _STACK_ORDER_LOCK:
+        global _BOSS_STACK_ORDER
+        _BOSS_STACK_ORDER = ()
+
+
+def _restore_stacked_window(hwnd: int, order) -> None:
+    if not win32gui.IsWindow(hwnd):
+        return
+
+    try:
+        index = order.index(hwnd)
+    except ValueError:
+        return
+
+    flags = (
+        win32con.SWP_NOMOVE
+        | win32con.SWP_NOSIZE
+        | win32con.SWP_NOACTIVATE
+    )
+
+    # Placement order is back-to-front: every lower window is above the
+    # previous one so only the previous top strip remains visible.
+    if index + 1 < len(order):
+        above = order[index + 1]
+        if win32gui.IsWindow(above):
+            win32gui.SetWindowPos(
+                hwnd,
+                above,
+                0,
+                0,
+                0,
+                0,
+                flags,
+            )
+            return
+
+    win32gui.SetWindowPos(
+        hwnd,
+        win32con.HWND_TOPMOST,
+        0,
+        0,
+        0,
+        0,
+        flags,
+    )
+
+
+@contextmanager
+def non_boss_window_visible(hwnd: int):
+    """
+    In overlap mode only, temporarily raise the target window for startup
+    asset capture/click, then restore its stack position.
+
+    Boss HP scans never use this helper, so their hot path gets no extra
+    z-order work.
+    """
+    with _STACK_ORDER_LOCK:
+        order = _BOSS_STACK_ORDER
+
+    if hwnd not in order:
+        yield
+        return
+
+    with _NON_BOSS_VISIBILITY_LOCK:
+        if not win32gui.IsWindow(hwnd):
+            yield
+            return
+
+        flags = (
+            win32con.SWP_NOMOVE
+            | win32con.SWP_NOSIZE
+            | win32con.SWP_NOACTIVATE
+        )
+
+        win32gui.SetWindowPos(
+            hwnd,
+            win32con.HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            flags,
+        )
+
+        try:
+            yield
+        finally:
+            with _STACK_ORDER_LOCK:
+                current_order = _BOSS_STACK_ORDER
+
+            if hwnd in current_order:
+                _restore_stacked_window(
+                    hwnd,
+                    current_order,
+                )
 
 def set_profile_window_title(hwnd: int, profile_name: str) -> None:
     """Set the visible game window title to the configured profile name."""
