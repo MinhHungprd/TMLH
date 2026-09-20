@@ -107,7 +107,31 @@ def discover_game_remote(process: psutil.Process) -> dict:
         f"game server {GAME_SERVER_IP}"
     )
 
+def has_gameplay_socket(pid: int) -> bool:
+    """
+    True khi đúng PID đã có socket gameplay :1002.
+    Không coi :8001 là ingame.
+    """
+    try:
+        process = psutil.Process(pid)
 
+        for conn in process.net_connections(kind="tcp"):
+            if not conn.raddr:
+                continue
+
+            if conn.status != psutil.CONN_ESTABLISHED:
+                continue
+
+            if (
+                conn.raddr.ip == GAME_SERVER_IP
+                and conn.raddr.port == GAMEPLAY_PORT
+            ):
+                return True
+
+    except psutil.Error:
+        return False
+
+    return False
 # ---------- Gửi ----------
 def send_packet(pid: int, packet: str, wait: float, stop_event=None) -> int:
     if stop_event is not None and stop_event.is_set():

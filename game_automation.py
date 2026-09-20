@@ -11,7 +11,11 @@ from automation_constants import (
     BOSS_ENTER_WAIT, BOSS_OCR_INTERVAL, BOSS_RESPAWN_WAIT,
     GAME_START_WAIT, IN_GAME_CONFIRM_SECONDS,
 )
-from boss.enter_boss import enter_boss, exit_boss
+from boss.enter_boss import (
+    enter_boss,
+    exit_boss,
+    has_gameplay_socket,
+)
 from boss_detector import BossDetector
 from game_state import CLICK_CENTER, GameStateDetector
 from input_manager import InputManager
@@ -68,10 +72,25 @@ class GameLifecycle:
 
 class AutomationWorker:
     def __init__(
-        self, context, on_status=None, on_error=None, *, lifecycle=None,
-        detector=None, boss_detector=None, input_manager=None,
-        enter=None, exit=None, wait=None, now=None,
+        self,
+        context,
+        on_status=None,
+        on_error=None,
+        *,
+        lifecycle=None,
+        detector=None,
+        boss_detector=None,
+        input_manager=None,
+        enter=None,
+        exit=None,
+        wait=None,
+        now=None,
+        gameplay_ready=None,
     ):
+        self.gameplay_ready = (
+            gameplay_ready
+            or has_gameplay_socket
+        )
         self.context = context
         self.on_status = on_status or (lambda _state: None)
         self.on_error = on_error or (lambda _exc: None)
@@ -120,47 +139,123 @@ class AutomationWorker:
     def _halted(self):
         return self.context.stop_event.is_set()
 
-    def _ensure_in_game(self):
+    def _ensure_in_game(
+        self,
+        require_gameplay_socket=False,
+        timeout=None,
+    ):
         absent_since = None
+
+        deadline = (
+            self.now() + timeout
+            if timeout is not None
+            else None
+        )
+
         self._state("WAITING_GAME")
+
         while not self._halted():
+            if (
+                deadline is not None
+                and self.now() >= deadline
+            ):
+                raise RuntimeError(
+                    f"{self.context.profile_name}: "
+                    "không thể hoàn tất quá trình vào game "
+                    f"trong {timeout:.0f}s"
+                )
+
             if not self.lifecycle.valid(self.context):
                 raise RuntimeError(
                     "Game window closed or changed owner"
                 )
 
-            # Unity có thể tự reset resolution khi đổi scene.
-            resized = self.lifecycle.ensure_size(self.context)
+            # Unity có thể đổi resolution khi đổi scene.
+            resized = self.lifecycle.ensure_size(
+                self.context
+            )
 
             if resized:
-                # Cho Unity render lại frame sau resize.
-                if self.wait(0.15, self.context.stop_event):
+                if self.wait(
+                    0.15,
+                    self.context.stop_event,
+                ):
                     return False
 
-            checks = self.detector.check_signals(self.context)
+            # QUAN TRỌNG:
+            # Detector phải tiếp tục chạy trong lúc chờ :1002,
+            # để s2/s3 xuất hiện thì bot còn click được.
+            checks = self.detector.check_signals(
+                self.context
+            )
+
             if self._halted():
                 return False
-            if checks and any(check.detected for check in checks):
+
+            detected_checks = [
+                check
+                for check in checks
+                if check.detected
+            ]
+
+            if detected_checks:
                 absent_since = None
+
                 self._state("WAITING_GAME")
-                for check in checks:
+
+                for check in detected_checks:
                     if self._halted():
                         return False
-                    if check.detected and check.action == CLICK_CENTER:
+
+                    if (
+                        check.action == CLICK_CENTER
+                        and check.coordinates is not None
+                    ):
                         self.input_manager.click_center(
-                            self.context.window_handle, check.coordinates, self.context.stop_event,
+                            self.context.window_handle,
+                            check.coordinates,
+                            self.context.stop_event,
                             self.context.process_id,
                         )
+
             else:
                 observed_at = self.now()
+
                 if absent_since is None:
                     absent_since = observed_at
-                self._state("CONFIRMING_IN_GAME")
-                if observed_at - absent_since >= IN_GAME_CONFIRM_SECONDS:
-                    self._state("IN_GAME")
-                    return True
-            if self.wait(0.25, self.context.stop_event):
+
+                if (
+                    observed_at - absent_since
+                    >= IN_GAME_CONFIRM_SECONDS
+                ):
+                    # Normal boss cycle:
+                    # giữ hành vi cũ.
+                    if not require_gameplay_socket:
+                        self._state("IN_GAME")
+                        return True
+
+                    # Startup đặc biệt:
+                    # signal biến mất CHƯA đủ.
+                    # PID còn phải có gameplay socket :1002.
+                    if self.gameplay_ready(
+                        self.context.process_id
+                    ):
+                        self._state("IN_GAME")
+                        return True
+
+                    # Chưa :1002 thì KHÔNG return.
+                    # Tiếp tục screenshot để nếu signal tiếp theo
+                    # xuất hiện thì bot vẫn click được.
+                    self._state(
+                        "WAITING_GAMEPLAY_SOCKET"
+                    )
+
+            if self.wait(
+                0.25,
+                self.context.stop_event,
+            ):
                 return False
+
         return False
 
     def run(self):
@@ -169,14 +264,17 @@ class AutomationWorker:
                 return
             self._state("LAUNCHING_GAME")
 
-            # Registry login của game là global theo Windows user.
+            initial_in_game = False
+
+            # Account Registry là global.
             #
-            # Vì vậy:
-            #   restore A -> launch A -> đợi A load
-            # rồi mới:
-            #   restore B -> launch B
+            # Phải giữ lock từ lúc:
+            # restore account
+            # → launch
+            # → click startup UI
+            # → có socket :1002
             #
-            # Không được launch hai profile đồng thời ở bước này.
+            # thì profile sau mới được phép restore Registry.
             with PROFILE_LAUNCH_LOCK:
                 pid, hwnd, launched = self.lifecycle.open(
                     self.context
@@ -185,6 +283,33 @@ class AutomationWorker:
                 self.context.process_id = pid
                 self.context.window_handle = hwnd
 
+                if self._halted():
+                    return
+
+                self.lifecycle.resize(
+                    self.context
+                )
+
+                if launched:
+                    self._state("WAITING_STARTUP")
+
+                    if self.wait(
+                        GAME_START_WAIT,
+                        self.context.stop_event,
+                    ):
+                        return
+
+                # Đây mới là chỗ xử lý startup.
+                #
+                # Nó vừa detect/click asset,
+                # vừa chờ cho đến khi đúng PID có :1002.
+                if not self._ensure_in_game(
+                    require_gameplay_socket=True,
+                    timeout=90.0,
+                ):
+                    return
+
+                initial_in_game = True
                 if self._halted():
                     return
 
@@ -214,8 +339,25 @@ class AutomationWorker:
                             f"sau khi restore account"
                         )
             while not self._halted():
-                if not self._ensure_in_game():
+
+                # Lần đầu đã được _ensure_in_game()
+                # xử lý bên trong PROFILE_LAUNCH_LOCK.
+                if initial_in_game:
+                    initial_in_game = False
+
+                else:
+                    if not self._ensure_in_game():
+                        break
+
+                if self._halted():
                     break
+
+                self._state("ENTERING_BOSS")
+
+                self.enter(
+                    self.context.process_id,
+                    self.context.selected_boss,
+                )
                 if self._halted():
                     break
                 self._state("ENTERING_BOSS")
