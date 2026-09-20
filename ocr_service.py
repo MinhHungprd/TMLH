@@ -1,7 +1,13 @@
 from pathlib import Path
 import shutil
+import threading
 
 import pytesseract
+
+
+# Tesseract starts an external process per OCR call. Limiting concurrent
+# calls prevents many profiles from spiking CPU at the same instant.
+_OCR_SEMAPHORE = threading.BoundedSemaphore(2)
 
 
 class OcrConfigurationError(RuntimeError):
@@ -42,7 +48,8 @@ class OcrService:
         )
 
     def read(self, image):
-        return pytesseract.image_to_string(
-            image,
-            config=self.config,
-        )
+        with _OCR_SEMAPHORE:
+            return pytesseract.image_to_string(
+                image,
+                config=self.config,
+            )
