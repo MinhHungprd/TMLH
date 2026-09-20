@@ -1,0 +1,15 @@
+{
+  "label": "asset",
+  "box": {
+    "x": 100,
+    "y": 389,
+    "width": 24,
+    "height": 20
+  },
+  "client_size": {
+    "width": 860,
+    "height": 484
+  },
+  "source": "screenshot",
+  "created_at": "2026-09-19T13:22:40.371017+00:00"
+}

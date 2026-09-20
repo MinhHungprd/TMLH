@@ -1,0 +1,1818 @@
+Bạn là **Senior Python Automation Engineer**, chuyên Windows desktop automation, computer vision, OCR, multi-process/multi-window automation và GUI desktop.
+
+Nhiệm vụ của bạn là đọc toàn bộ source hiện tại và **trực tiếp chỉnh sửa project** để triển khai hệ thống quản lý nhiều Profile + tự động săn Boss cho game Thiên Mệnh Lạc Hồng theo đặc tả dưới đây.
+
+# 0. NGUYÊN TẮC BẮT BUỘC
+
+Trước khi code:
+
+* Đọc cấu trúc toàn bộ project liên quan.
+* Xác định framework UI hiện tại.
+* Đọc code launch game.
+* Đọc code screenshot/image matching/OCR.
+* Đọc toàn bộ thư mục `boss`.
+* Xác định chính xác 3 loại Boss hiện tại.
+* Xác định hàm vào Boss.
+* Xác định hàm Exit Boss.
+* Xác định cách project hiện tại tìm process/window.
+* Xác định cách click/tap hiện tại.
+* Xác định config/storage hiện tại.
+
+Ưu tiên **tái sử dụng code đang có**.
+
+Không rewrite project từ đầu.
+
+Không refactor những phần không liên quan.
+
+Không đổi framework UI nếu không bắt buộc.
+
+Không tự thêm chức năng ngoài yêu cầu.
+
+Nếu có điểm không thể xác định từ source hoặc requirement, ghi rõ:
+
+`BLOCKED / NEED CLARIFICATION`
+
+Không tự suy diễn nghiệp vụ.
+
+---
+
+# 1. MỤC TIÊU HỆ THỐNG
+
+Ứng dụng quản lý nhiều game Profile.
+
+Mỗi Profile:
+
+* có một bản clone game riêng;
+* có process game riêng;
+* có window riêng;
+* chọn Boss riêng;
+* chọn resolution riêng;
+* chạy automation riêng;
+* có state riêng;
+* có stop event riêng.
+
+Người dùng có thể chọn **nhiều Profile cùng lúc** rồi Start.
+
+Các Profile phải có khả năng chạy automation đồng thời.
+
+Game window của các Profile được:
+
+* resize theo kích thước người dùng chọn;
+* tự động sắp xếp gọn trên màn hình;
+* không chồng lên nhau nếu diện tích màn hình cho phép.
+
+---
+
+# 2. BỎ HỆ THỐNG LOGIN CŨ
+
+Xóa khỏi UI:
+
+* username;
+* password;
+* auto login bằng tài khoản/mật khẩu.
+
+Ứng dụng KHÔNG lưu username/password.
+
+Người dùng sẽ tự đăng nhập trực tiếp trong game.
+
+---
+
+# 3. GAME SOURCE PATH
+
+Lần đầu sử dụng ứng dụng, người dùng phải chọn thư mục game gốc.
+
+Ví dụ hiện tại:
+
+`D:\2026_Part2\2026_Part2\Source\Bot_Thien_Menh_Lac_Hong\Game\ThienMenhLacHong_Launcher`
+
+Nhưng:
+
+**KHÔNG hard-code đường dẫn này.**
+
+UI cần:
+
+`Game Source Path`
+
+và nút:
+
+`Browse`
+
+Validate launcher:
+
+`<source_path>\ThienMenhLacHong_Launcher.exe`
+
+Nếu không tồn tại:
+
+* báo lỗi;
+* không cho tạo Profile.
+
+Game Source Path phải persist xuống config để lần sau mở app không cần chọn lại.
+
+---
+
+# 4. THƯ MỤC GAME PROFILE
+
+Các bản clone phải nằm **bên trong project Bot**.
+
+Tạo cấu trúc tương đương:
+
+```text
+BOT_ROOT/
+├── Game/
+│   ├── profiles/
+│   │   ├── <profile_1>/
+│   │   │   └── ThienMenhLacHong_Launcher/
+│   │   │       └── ThienMenhLacHong_Launcher.exe
+│   │   │
+│   │   ├── <profile_2>/
+│   │   │   └── ThienMenhLacHong_Launcher/
+│   │   │       └── ThienMenhLacHong_Launcher.exe
+```
+
+Có thể điều chỉnh tên folder `profiles` để phù hợp project hiện tại, nhưng nguyên tắc là:
+
+**mỗi Profile có một game directory hoàn toàn riêng.**
+
+Không cho 2 Profile sử dụng chung một clone game.
+
+Không sửa game source gốc.
+
+---
+
+# 5. TẠO PROFILE
+
+UI có:
+
+* Profile Name;
+* Create Profile.
+
+Khi Create Profile:
+
+## Bước 1 — Validate
+
+Tên Profile:
+
+* không rỗng;
+* không trùng;
+* không chứa ký tự Windows invalid;
+* được convert thành safe folder name nếu cần.
+
+## Bước 2 — Clone game
+
+Copy toàn bộ thư mục game source sang:
+
+`BOT_ROOT/Game/profiles/<profile>/...`
+
+Copy phải chạy background.
+
+Không freeze UI khi copy thư mục lớn.
+
+Hiển thị:
+
+`Copying game...`
+
+## Bước 3 — Launch Profile
+
+Sau khi clone thành công, launch:
+
+`<profile_game_path>\ThienMenhLacHong_Launcher.exe`
+
+Lưu PID.
+
+## Bước 4 — Startup wait
+
+Sau khi mở process:
+
+đợi chính xác khoảng:
+
+`10 giây`
+
+trước khi bắt đầu kiểm tra game.
+
+Sleep phải interruptible.
+
+## Bước 5 — Người dùng login
+
+Người dùng tự:
+
+* đăng nhập;
+* vào giao diện chính của game.
+
+UI hiển thị nút:
+
+`Đã đăng nhập`
+
+## Bước 6 — Finish
+
+Khi người dùng nhấn:
+
+`Đã đăng nhập`
+
+profile chuyển sang:
+
+`READY`
+
+và persist xuống storage.
+
+Từ những lần sau không cần clone lại game.
+
+Nếu session login của game còn hợp lệ thì không yêu cầu login lại.
+
+---
+
+# 6. PROFILE STORAGE
+
+Persist Profile xuống disk.
+
+Ưu tiên dùng storage hiện tại nếu đã có.
+
+Nếu chưa có thì JSON là đủ.
+
+Mỗi Profile tối thiểu lưu:
+
+```text
+profile_id
+profile_name
+game_path
+login_ready
+selected_boss
+window_width
+window_height
+created_at
+```
+
+Runtime data như PID/HWND không persist.
+
+---
+
+# 7. PROFILE TABLE UI
+
+Mỗi Profile = một dòng.
+
+Ví dụ:
+
+```text
+[✓] Profile Name | Status | Boss ▼ | Size ▼ | Runtime Status
+```
+
+Cho phép chọn Boss riêng từng Profile.
+
+Boss lấy từ 3 loại Boss hiện có trong thư mục:
+
+`boss`
+
+Không duplicate logic Boss.
+
+Resolution gồm đúng:
+
+```text
+320x180
+480x270
+640x360
+800x450
+860x484
+```
+
+Người dùng:
+
+1. tick nhiều Profile;
+2. chọn Boss;
+3. chọn resolution;
+4. nhấn `Start`.
+
+Tất cả Profile được tick sẽ chạy.
+
+Có:
+
+`Start`
+
+và:
+
+`Stop`
+
+cho các Profile đang được chọn.
+
+Nếu phù hợp UI hiện tại có thể thêm Stop riêng từng row.
+
+---
+
+# 8. MULTI-PROFILE RUNTIME
+
+Mỗi Profile có một runtime context độc lập.
+
+Ví dụ:
+
+```python
+ProfileRuntimeContext:
+    profile_id
+    profile_name
+    game_path
+
+    process_id
+    window_handle
+
+    selected_boss
+    window_width
+    window_height
+
+    state
+
+    stop_event
+
+    boss_dead_streak
+```
+
+Không dùng chung:
+
+* PID;
+* HWND;
+* current state;
+* Boss;
+* OCR state;
+* stop flag;
+
+giữa các Profile.
+
+---
+
+# 9. MAPPING PROFILE → PROCESS → WINDOW
+
+Sau khi launch:
+
+1. lấy PID;
+2. tìm HWND thuộc PID đó;
+3. xác nhận window hợp lệ;
+4. lưu HWND trong runtime context.
+
+Mọi thao tác của Profile A:
+
+* screenshot;
+* resize;
+* OCR;
+* image matching;
+* click;
+
+phải thực hiện trên window A.
+
+Không dùng:
+
+`GetForegroundWindow()`
+
+rồi mặc định đó là Profile hiện tại.
+
+Không được thao tác nhầm window khác.
+
+---
+
+# 10. RESIZE WINDOW
+
+Khi Start Profile:
+
+resize game theo resolution được chọn.
+
+Ví dụ:
+
+`480x270`
+
+phải tạo vùng render/client game tương ứng với kích thước đó nếu implementation hiện tại cho phép.
+
+Không resize mỗi vòng loop.
+
+Chỉ resize khi:
+
+* Start;
+* resolution thay đổi;
+* window bị thay đổi bất thường và cần restore.
+
+---
+
+# 11. AUTO ARRANGE WINDOWS
+
+Khi Start nhiều Profile:
+
+tự động sắp xếp các cửa sổ trên màn hình.
+
+Ưu tiên:
+
+```text
+trái → phải
+hết chiều ngang → xuống dòng
+```
+
+Dựa trên Windows working area:
+
+* không che Taskbar;
+* không đặt window ngoài màn hình;
+* hạn chế overlap.
+
+Phải hỗ trợ các Profile có resolution khác nhau.
+
+Không tự đổi resolution mà người dùng đã chọn chỉ để làm chúng vừa màn hình.
+
+Nếu tất cả window không thể fit hoàn toàn:
+
+* giữ nguyên resolution;
+* sử dụng best-effort layout;
+* ghi warning rõ ràng trong log/UI.
+
+---
+
+# 12. MULTI-PROFILE VÀ INPUT
+
+OCR/image matching/screenshot của nhiều Profile có thể chạy song song.
+
+Tuy nhiên thao tác bằng **physical mouse** có thể conflict.
+
+Nếu game/source hiện tại hỗ trợ input trực tiếp theo HWND/background input đáng tin cậy thì ưu tiên sử dụng nó.
+
+Nếu bắt buộc phải dùng chuột thật:
+
+phải có một:
+
+`GlobalInputLock`
+
+Khi Profile cần click:
+
+```text
+acquire input lock
+→ verify HWND
+→ focus đúng game window nếu cần
+→ click đúng tọa độ
+→ release input lock
+```
+
+Không để Profile A và B điều khiển chuột đồng thời.
+
+Chỉ serialize thao tác input.
+
+Không serialize OCR/image matching nếu không cần.
+
+---
+
+# 13. HỆ TỌA ĐỘ GỐC
+
+Tất cả sample/ROI hiện tại được lấy từ resolution chuẩn:
+
+`BASE_WIDTH = 860`
+
+`BASE_HEIGHT = 484`
+
+Do đó tất cả tọa độ được cung cấp sau đây là:
+
+**BASE COORDINATES 860×484**
+
+Khi game chạy resolution khác:
+
+PHẢI scale:
+
+* tọa độ X;
+* tọa độ Y;
+* ROI width;
+* ROI height;
+* template/sample image.
+
+Không được sử dụng nguyên tọa độ 860×484 trên window nhỏ hơn.
+
+---
+
+# 14. SCALE COORDINATES
+
+Với resolution hiện tại:
+
+```python
+scale_x = current_width / 860
+scale_y = current_height / 484
+```
+
+Scale ROI:
+
+```python
+scaled_x = round(base_x * scale_x)
+scaled_y = round(base_y * scale_y)
+
+scaled_w = round(base_w * scale_x)
+scaled_h = round(base_h * scale_y)
+```
+
+Scale X và Y độc lập.
+
+Không assume tuyệt đối rằng `scale_x == scale_y`.
+
+Centralize logic thành function chung.
+
+Ví dụ:
+
+```python
+scale_roi(base_roi, current_width, current_height)
+```
+
+Không rải phép scale ở nhiều file.
+
+---
+
+# 15. SCALE SAMPLE / TEMPLATE
+
+Các file sample hiện tại cũng dựa trên:
+
+`860x484`
+
+Khi resolution nhỏ hơn:
+
+template cũng phải resize tương ứng.
+
+Ví dụ sample gốc:
+
+```text
+29x38
+```
+
+ở:
+
+`320x180`
+
+sẽ khoảng:
+
+```text
+11x14
+```
+
+Không sử dụng template 29×38 để match trực tiếp trên ROI 11×14.
+
+Load original asset một lần.
+
+Tạo/cached version cho từng resolution:
+
+```text
+320x180
+480x270
+640x360
+800x450
+860x484
+```
+
+Không resize asset lại mỗi vòng scan.
+
+Cache theo dạng tương đương:
+
+```python
+template_cache[
+    (asset_name, width, height)
+]
+```
+
+Khi downscale image template có thể dùng:
+
+`cv2.INTER_AREA`
+
+nếu project sử dụng OpenCV.
+
+Không thay library nếu source hiện tại có cách resize tương đương tốt.
+
+---
+
+# 16. BASE ROI
+
+## GAME SIGNAL 1
+
+```text
+asset:
+assets\asset__x795_y29_w29_h38.png
+
+base ROI:
+x = 795
+y = 29
+w = 29
+h = 38
+```
+
+Nếu detect:
+
+`NOT_IN_GAME = TRUE`
+
+Signal này chỉ để kiểm tra.
+
+**KHÔNG CLICK.**
+
+---
+
+## GAME SIGNAL 2
+
+```text
+asset:
+assets\asset__x742_y437_w45_h24.png
+
+base ROI:
+x = 742
+y = 437
+w = 45
+h = 24
+```
+
+Nếu detect:
+
+`NOT_IN_GAME = TRUE`
+
+và click vào:
+
+**tâm vùng detect đã scale.**
+
+---
+
+## GAME SIGNAL 3
+
+```text
+asset:
+assets\asset__x392_y389_w75_h35.png
+
+base ROI:
+x = 392
+y = 389
+w = 75
+h = 35
+```
+
+Nếu detect:
+
+`NOT_IN_GAME = TRUE`
+
+click vào tâm.
+
+---
+
+# 17. ROI THAM KHẢO SAU SCALE
+
+Theo công thức scale + round:
+
+```text
+320x180
+
+S1:  x=296 y=11  w=11 h=14
+S2:  x=276 y=163 w=17 h=9
+S3:  x=146 y=145 w=28 h=13
+Boss:x=140 y=3   w=25 h=8
+```
+
+```text
+480x270
+
+S1:  x=444 y=16  w=16 h=21
+S2:  x=414 y=244 w=25 h=13
+S3:  x=219 y=217 w=42 h=20
+Boss:x=209 y=4   w=37 h=12
+```
+
+```text
+640x360
+
+S1:  x=592 y=22  w=22 h=28
+S2:  x=552 y=325 w=33 h=18
+S3:  x=292 y=289 w=56 h=26
+Boss:x=279 y=6   w=49 h=16
+```
+
+```text
+800x450
+
+S1:  x=740 y=27  w=27 h=35
+S2:  x=690 y=406 w=42 h=22
+S3:  x=365 y=362 w=70 h=33
+Boss:x=349 y=7   w=61 h=20
+```
+
+```text
+860x484
+
+S1:  x=795 y=29  w=29 h=38
+S2:  x=742 y=437 w=45 h=24
+S3:  x=392 y=389 w=75 h=35
+Boss:x=375 y=8   w=66 h=22
+```
+
+Các giá trị trên chỉ là kết quả reference của công thức.
+
+Implementation vẫn phải calculate từ base coordinate để tránh duplicate config.
+
+---
+
+# 18. CHECK ĐÃ VÀO GAME
+
+Mỗi vòng trước khi săn Boss phải đảm bảo Profile thực sự đã vào game.
+
+Scan 3 Signal.
+
+Nếu phát hiện ít nhất 1:
+
+```text
+NOT_IN_GAME = TRUE
+```
+
+Signal 1:
+
+* không click.
+
+Signal 2:
+
+* click center nếu detect.
+
+Signal 3:
+
+* click center nếu detect.
+
+Khi còn bất kỳ Signal nào:
+
+**KHÔNG được bắt đầu săn Boss.**
+
+---
+
+# 19. XÁC NHẬN IN_GAME
+
+Không xác nhận ngay khi signal vừa biến mất.
+
+Phải đảm bảo:
+
+```text
+Signal 1 absent
+AND
+Signal 2 absent
+AND
+Signal 3 absent
+```
+
+liên tục:
+
+`>= 3 giây`
+
+mới chuyển:
+
+`IN_GAME`
+
+Nếu trong 3 giây bất kỳ signal nào quay lại:
+
+reset timer.
+
+Pseudo logic:
+
+```python
+if any_signal_detected:
+    absent_since = None
+
+else:
+    if absent_since is None:
+        absent_since = now
+
+    if now - absent_since >= 3:
+        state = IN_GAME
+```
+
+---
+
+# 20. GAME STARTUP
+
+Mỗi khi launch game process:
+
+```text
+launch EXE
+→ wait interruptible 10 seconds
+→ bắt đầu check game state
+```
+
+Không scan ngay lúc process vừa mở.
+
+---
+
+# 21. STATE MACHINE
+
+Không implement bằng một `while True` hỗn loạn.
+
+State machine tối thiểu:
+
+```text
+STOPPED
+
+LAUNCHING_GAME
+
+WAITING_STARTUP
+
+WAITING_GAME
+
+CONFIRMING_IN_GAME
+
+IN_GAME
+
+ENTERING_BOSS
+
+WAITING_BOSS_LOAD
+
+CHECKING_BOSS
+
+BOSS_DEAD
+
+EXITING_BOSS
+
+WAITING_RESPAWN
+
+ERROR
+```
+
+Flow chính:
+
+```text
+START
+ ↓
+LAUNCH/ATTACH WINDOW
+ ↓
+RESIZE
+ ↓
+WAIT 10s nếu vừa launch
+ ↓
+WAITING_GAME
+ ↓
+3s tất cả signal biến mất
+ ↓
+IN_GAME
+ ↓
+ENTERING_BOSS
+ ↓
+WAIT 3s
+ ↓
+CHECKING_BOSS
+ ↓
+Boss alive → tiếp tục OCR
+ ↓
+Boss dead
+ ↓
+EXITING_BOSS
+ ↓
+WAIT 16s
+ ↓
+CHECK IN_GAME
+ ↓
+ENTERING_BOSS
+ ↓
+...
+```
+
+Loop cho đến khi Stop.
+
+---
+
+# 22. ENTER BOSS
+
+Có 3 loại Boss.
+
+Implementation đã nằm trong:
+
+`boss`
+
+Đọc source và tái sử dụng.
+
+Không viết lại command Boss nếu không cần.
+
+Có thể tạo adapter/interface chung:
+
+```python
+enter_boss(
+    boss_type,
+    runtime_context
+)
+```
+
+nhưng chỉ refactor nếu an toàn.
+
+Sau khi hoàn tất câu lệnh Enter Boss:
+
+**đợi interruptible 3 giây**
+
+trước khi bắt đầu OCR Boss.
+
+State:
+
+`WAITING_BOSS_LOAD`
+
+---
+
+# 23. CHECK BOSS
+
+Boss HP OCR Base ROI:
+
+```text
+x = 375
+y = 8
+w = 66
+h = 22
+```
+
+ROI phải scale theo resolution hiện tại.
+
+---
+
+# 24. OCR PREPROCESSING
+
+Ở resolution nhỏ như:
+
+`320x180`
+
+ROI Boss chỉ khoảng:
+
+`25x8 px`
+
+Không nên OCR trực tiếp ảnh quá nhỏ này.
+
+Sau khi crop ROI đã scale:
+
+upscale ROI trước khi OCR.
+
+Ít nhất upscale về kích thước gần base:
+
+`66x22`
+
+hoặc lớn hơn nếu OCR hiện tại hoạt động tốt hơn.
+
+Có thể dùng:
+
+* grayscale;
+* resize;
+* contrast/threshold;
+
+nếu OCR implementation hiện tại cần.
+
+Không preprocess quá mức làm mất chữ số.
+
+OCR engine phải initialize một lần và reuse.
+
+Không initialize OCR engine mỗi 2 giây.
+
+---
+
+# 25. TẦN SUẤT OCR
+
+Trong state:
+
+`CHECKING_BOSS`
+
+OCR:
+
+**mỗi 2 giây.**
+
+Không OCR liên tục theo FPS.
+
+Sleep phải interruptible.
+
+---
+
+# 26. BOSS ALIVE
+
+Normalize OCR text.
+
+Nếu OCR có ít nhất một digit:
+
+```regex
+[0-9]
+```
+
+Boss được tính là:
+
+`ALIVE`
+
+Ví dụ:
+
+```text
+100
+83
+1235
+HP 75
+1,234
+```
+
+đều là alive.
+
+Khi có digit:
+
+```python
+boss_dead_streak = 0
+```
+
+---
+
+# 27. BOSS DEAD — 2 FRAME CONFIRMATION
+
+Không được xác định Boss chết chỉ sau 1 lần OCR fail.
+
+Nếu OCR không có digit:
+
+```python
+boss_dead_streak += 1
+```
+
+Chỉ khi:
+
+```python
+boss_dead_streak >= 2
+```
+
+mới xác nhận:
+
+`BOSS_DEAD`
+
+Hai lần phải là:
+
+**2 OCR liên tiếp**
+
+với interval:
+
+`2 giây`
+
+Nếu giữa hai lần có một frame OCR đọc được digit:
+
+reset:
+
+```python
+boss_dead_streak = 0
+```
+
+Ví dụ:
+
+```text
+OCR #1 = ""      → streak 1
+OCR #2 = "124"   → streak 0
+OCR #3 = ""      → streak 1
+OCR #4 = ""      → streak 2 → DEAD
+```
+
+---
+
+# 28. BOSS LOOP
+
+Flow:
+
+```python
+while not stop_event.is_set():
+
+    ensure_in_game()
+
+    enter_boss(selected_boss)
+
+    interruptible_wait(3)
+
+    dead_streak = 0
+
+    while not stop_event.is_set():
+
+        text = read_boss_hp()
+
+        if contains_digit(text):
+            dead_streak = 0
+
+        else:
+            dead_streak += 1
+
+            if dead_streak >= 2:
+                break
+
+        interruptible_wait(2)
+
+    if stop_event.is_set():
+        break
+
+    exit_boss()
+
+    interruptible_wait(16)
+```
+
+Sau 16 giây:
+
+không được assume vẫn IN_GAME.
+
+Phải quay lại:
+
+`ensure_in_game()`
+
+rồi mới Enter Boss tiếp.
+
+---
+
+# 29. EXIT BOSS
+
+Lệnh Exit Boss đã có trong thư mục `boss`.
+
+Reuse implementation hiện tại.
+
+Sau Boss DEAD:
+
+```text
+Exit Boss
+→ wait interruptible 16 seconds
+→ ensure IN_GAME
+→ Enter Boss again
+```
+
+---
+
+# 30. STOP
+
+Stop phải hoạt động trong mọi state.
+
+Ví dụ:
+
+* copying nếu implementation hỗ trợ cancel an toàn;
+* startup wait 10s;
+* waiting game;
+* confirming 3s;
+* entering Boss;
+* wait Boss 3s;
+* OCR loop;
+* wait OCR 2s;
+* wait respawn 16s.
+
+Không dùng sleep dài kiểu:
+
+```python
+time.sleep(16)
+```
+
+nếu nó khiến Stop phải đợi.
+
+Implement helper tương đương:
+
+```python
+def interruptible_wait(seconds, stop_event):
+    return stop_event.wait(seconds)
+```
+
+Nếu trả về True:
+
+Stop đã được yêu cầu.
+
+Khi Stop:
+
+* không click thêm;
+* không OCR thêm;
+* không Enter Boss thêm;
+* không Exit Boss thêm trừ khi source bắt buộc cleanup an toàn;
+* không restart game;
+* worker thoát sạch.
+
+---
+
+# 31. THREADING / CONCURRENCY
+
+Không chạy automation trên UI thread.
+
+Mỗi Profile có worker riêng hoặc task riêng phù hợp framework.
+
+UI vẫn responsive khi:
+
+* copy game;
+* launch nhiều game;
+* OCR;
+* Boss loop.
+
+UI update phải thread-safe.
+
+Không gọi UI widget trực tiếp từ worker nếu framework cấm.
+
+---
+
+# 32. IMAGE MATCHING PERFORMANCE
+
+Không scan toàn màn hình nếu ROI đã biết.
+
+Pipeline:
+
+```text
+capture đúng game/window
+→ crop scaled ROI
+→ lấy cached scaled template
+→ match
+```
+
+Asset load một lần.
+
+Scaled template cache một lần/resolution.
+
+Không:
+
+```text
+imread asset
+resize asset
+```
+
+mỗi scan.
+
+Giữ threshold image matching hiện tại nếu implementation đang hoạt động ổn.
+
+Nếu cần thay threshold phải ghi rõ lý do.
+
+---
+
+# 33. OCR PERFORMANCE
+
+Chỉ OCR Boss ROI.
+
+Không OCR toàn màn hình.
+
+OCR mỗi:
+
+`2 giây`
+
+Không ghi screenshot ra disk mỗi lần OCR.
+
+Có thể ghi debug screenshot khi:
+
+* OCR exception;
+* debug mode bật;
+* cần chẩn đoán lỗi.
+
+---
+
+# 34. WINDOW SCREENSHOT
+
+Ưu tiên screenshot theo HWND/client area nếu code hiện tại hỗ trợ.
+
+Không phụ thuộc mù quáng vào toàn desktop screenshot nếu có thể capture window trực tiếp.
+
+Coordinate scale phải dựa trên:
+
+**game client area**
+
+không phải kích thước toàn màn hình Windows.
+
+Nếu window có titlebar/border thì phải xử lý offset chính xác.
+
+---
+
+# 35. CLICK COORDINATE
+
+Signal 2 và Signal 3:
+
+click vào center của scaled ROI/detected template.
+
+Nếu dùng tọa độ client:
+
+convert sang screen coordinate nếu API mouse yêu cầu.
+
+Không click tọa độ base 860×484 trực tiếp khi game đang chạy resolution nhỏ hơn.
+
+---
+
+# 36. UI DESIGN
+
+Thiết kế UI desktop utility:
+
+* nhỏ gọn;
+* tỷ lệ gần 16:9;
+* không chiếm toàn màn hình;
+* dễ hiểu;
+* ít popup.
+
+Ví dụ:
+
+```text
+┌──────────────────────────────────────────────────────┐
+│ Game Path: [...........................] [Browse]     │
+├──────────────────────────────────────────────────────┤
+│ New Profile: [..............] [Create Profile]       │
+├──────────────────────────────────────────────────────┤
+│ ✓ | Profile | Status | Boss | Size | Runtime         │
+│ □ | Acc 01  | Ready  | B1 ▼ | 480x270 ▼ | Stopped  │
+│ □ | Acc 02  | Ready  | B2 ▼ | 320x180 ▼ | Stopped  │
+│ □ | Acc 03  | Ready  | B1 ▼ | 640x360 ▼ | Stopped  │
+├──────────────────────────────────────────────────────┤
+│ [Start Selected] [Stop Selected]                     │
+└──────────────────────────────────────────────────────┘
+```
+
+Không cần giống tuyệt đối mockup.
+
+Ưu tiên usability.
+
+---
+
+# 37. PROFILE CREATION UI STATE
+
+Trong lúc tạo Profile hiển thị:
+
+```text
+Creating
+Copying Game
+Launching
+Waiting Startup
+Waiting Login
+Ready
+Error
+```
+
+Sau launch:
+
+người dùng có:
+
+`Đã đăng nhập`
+
+Không yêu cầu password trong ứng dụng.
+
+---
+
+# 38. RUNTIME STATUS
+
+Hiển thị ít nhất các trạng thái quan trọng:
+
+```text
+Stopped
+
+Launching Game
+
+Waiting Startup
+
+Waiting Game
+
+Confirming Game 1.4/3s
+
+In Game
+
+Entering Boss
+
+Waiting Boss 3s
+
+Boss Alive
+
+Boss Check 1/2 Failed
+
+Boss Dead
+
+Exiting Boss
+
+Waiting Respawn
+
+Error
+```
+
+Không update UI mỗi frame.
+
+Chỉ update khi state/thông tin quan trọng thay đổi.
+
+---
+
+# 39. LOGGING
+
+Log có:
+
+```text
+timestamp
+profile
+state
+message
+```
+
+Ví dụ:
+
+```text
+[16:20:01] [Profile 01] Launching game
+[16:20:11] [Profile 01] Startup wait complete
+
+[16:20:14] [Profile 01] IN_GAME confirmed
+
+[16:20:15] [Profile 01] Entering Boss 1
+[16:20:18] [Profile 01] Boss check started
+
+[16:20:18] [Profile 01] OCR="1284" -> ALIVE
+
+[16:20:24] [Profile 01] OCR="" -> dead check 1/2
+[16:20:26] [Profile 01] OCR="" -> dead check 2/2
+[16:20:26] [Profile 01] Boss DEAD
+
+[16:20:27] [Profile 01] Exit boss
+[16:20:27] [Profile 01] Waiting 16s
+```
+
+Không spam OCR result mỗi vài millisecond.
+
+---
+
+# 40. ERROR HANDLING
+
+Handle tối thiểu:
+
+* source path không tồn tại;
+* launcher không tồn tại;
+* duplicate profile;
+* illegal profile name;
+* copy game fail;
+* disk full;
+* permission denied;
+* launch fail;
+* PID không tồn tại;
+* HWND không tìm thấy;
+* game crash;
+* window bị đóng;
+* asset thiếu;
+* image matching lỗi;
+* OCR lỗi;
+* Boss module lỗi;
+* config/profile JSON lỗi;
+* selected resolution invalid;
+* input lock exception.
+
+Một Profile lỗi:
+
+**không được crash toàn app hoặc worker Profile khác.**
+
+---
+
+# 41. CẤU TRÚC CODE KHUYẾN NGHỊ
+
+Chỉ sử dụng nếu phù hợp source hiện tại:
+
+```text
+ProfileManager
+ProfileStorage
+
+GameLauncher
+GameWindowManager
+WindowLayoutManager
+
+GameStateDetector
+ScaledAssetCache
+
+BossController
+BossDetector
+
+AutomationWorker
+InputManager
+
+UI
+```
+
+Không bắt buộc rewrite theo cấu trúc này.
+
+Nếu source đã có module tương đương:
+
+reuse.
+
+---
+
+# 42. CONSTANTS
+
+Centralize:
+
+```python
+BASE_WIDTH = 860
+BASE_HEIGHT = 484
+
+GAME_START_WAIT = 10.0
+
+IN_GAME_CONFIRM_SECONDS = 3.0
+
+BOSS_ENTER_WAIT = 3.0
+
+BOSS_OCR_INTERVAL = 2.0
+
+BOSS_DEAD_CONFIRM_COUNT = 2
+
+BOSS_RESPAWN_WAIT = 16.0
+```
+
+Base ROI:
+
+```python
+SIGNAL_1 = (795, 29, 29, 38)
+SIGNAL_2 = (742, 437, 45, 24)
+SIGNAL_3 = (392, 389, 75, 35)
+
+BOSS_HP = (375, 8, 66, 22)
+```
+
+Không duplicate magic number khắp project.
+
+---
+
+# 43. START SELECTED
+
+Khi user chọn:
+
+```text
+Profile A
+Profile B
+Profile C
+```
+
+và nhấn Start:
+
+1. validate cả 3 Profile;
+2. launch game nếu chưa chạy;
+3. lấy PID/HWND riêng;
+4. resize từng window;
+5. arrange windows;
+6. start worker từng Profile;
+7. mỗi Profile xử lý state machine độc lập.
+
+Nếu Profile B error:
+
+A và C tiếp tục chạy.
+
+---
+
+# 44. KHÔNG ĐƯỢC LÀM
+
+Không:
+
+* dùng chung game clone;
+* dùng chung HWND;
+* dùng chung state;
+* dùng chung boss_dead_streak;
+* dùng chung Stop flag cho mọi profile trừ chức năng Stop All;
+* tự sửa logic Boss không liên quan;
+* OCR toàn màn hình;
+* image matching toàn màn hình;
+* reload asset mỗi loop;
+* resize asset mỗi loop;
+* OCR mỗi frame;
+* dùng base coordinate trên resolution nhỏ;
+* click Signal 1;
+* kết luận Boss dead chỉ sau một OCR fail;
+* săn Boss trước khi IN_GAME xác nhận 3 giây;
+* OCR ngay sau Enter Boss mà không chờ 3 giây;
+* block UI;
+* để hai worker điều khiển physical mouse cùng lúc;
+* dùng global foreground window để xác định Profile;
+* đổi resolution người dùng chọn mà không được yêu cầu.
+
+---
+
+# 45. TEST BẮT BUỘC
+
+## Profile
+
+Test:
+
+* chọn Source Path;
+* persist Source Path;
+* create Profile;
+* copy đúng folder;
+* game clone không dùng chung;
+* restart Bot vẫn còn Profile.
+
+## Launch
+
+Test:
+
+* launch đúng launcher của Profile;
+* lấy đúng PID;
+* lấy đúng HWND;
+* wait 10 giây.
+
+## Resolution
+
+Test đủ:
+
+```text
+320x180
+480x270
+640x360
+800x450
+860x484
+```
+
+Check:
+
+* resize đúng;
+* ROI scale đúng;
+* template scale đúng.
+
+## Signal
+
+Signal 1:
+
+* detect;
+* không click.
+
+Signal 2:
+
+* detect;
+* click center.
+
+Signal 3:
+
+* detect;
+* click center.
+
+## IN_GAME
+
+Test:
+
+```text
+signal absent 2.9s
+```
+
+→ chưa IN_GAME.
+
+```text
+signal absent 1s → xuất hiện → absent lại
+```
+
+→ timer reset.
+
+```text
+all absent >=3s
+```
+
+→ IN_GAME.
+
+## Boss
+
+Sau Enter:
+
+wait 3s.
+
+OCR:
+
+```text
+"1234"
+```
+
+→ ALIVE.
+
+```text
+""
+"128"
+```
+
+→ vẫn ALIVE.
+
+```text
+""
+""
+```
+
+→ DEAD.
+
+Interval giữa OCR:
+
+`2s`
+
+## Exit
+
+DEAD:
+
+```text
+Exit Boss
+→ wait 16s
+→ ensure IN_GAME
+→ Enter Boss
+```
+
+## Multi Profile
+
+Start ít nhất:
+
+```text
+3 Profile
+```
+
+Kiểm tra:
+
+* PID khác nhau;
+* HWND khác nhau;
+* OCR đúng window;
+* click đúng window;
+* không conflict mouse;
+* stop một Profile không dừng Profile khác.
+
+## Window Layout
+
+Start nhiều Profile:
+
+* resize đúng;
+* xếp trái → phải;
+* xuống hàng;
+* tránh overlap nếu đủ chỗ.
+
+## Stop
+
+Stop tại:
+
+* startup 10s;
+* confirming IN_GAME 3s;
+* Boss loading 3s;
+* OCR wait 2s;
+* respawn wait 16s.
+
+Worker phải stop nhanh và sạch.
+
+---
+
+# 46. KIỂM TRA SAU KHI CODE
+
+Sau implementation:
+
+* chạy syntax check;
+* chạy formatter/linter hiện có nếu project có;
+* chạy test hiện tại;
+* test import;
+* kiểm tra thread exception;
+* kiểm tra missing dependency;
+* kiểm tra application startup.
+
+Không được kết thúc task nếu app không start vì lỗi syntax/import do thay đổi vừa thực hiện.
+
+---
+
+# 47. OUTPUT KHI HOÀN THÀNH
+
+Cuối task hãy báo:
+
+### Files modified
+
+Liệt kê từng file sửa.
+
+### Files created
+
+Liệt kê file mới.
+
+### Architecture
+
+Giải thích ngắn:
+
+```text
+Profile
+→ Process
+→ HWND
+→ Automation Worker
+```
+
+### Profile storage
+
+Nêu nơi lưu Profile/config.
+
+### Coordinate scaling
+
+Nêu cách scale từ:
+
+`860x484`
+
+sang resolution hiện tại.
+
+### Asset scaling
+
+Nêu cách cache template từng resolution.
+
+### OCR
+
+Nêu:
+
+```text
+2s/check
+2 consecutive failures = DEAD
+```
+
+### State machine
+
+Nêu flow chính.
+
+### Multi Profile
+
+Giải thích:
+
+* worker độc lập;
+* screenshot/OCR song song;
+* input serialization nếu cần physical mouse.
+
+### Tests
+
+Liệt kê test đã chạy và kết quả.
+
+### Remaining issues
+
+Nếu có lỗi/chưa xác định:
+
+ghi rõ.
+
+Không che giấu lỗi.
+
+---
+
+# 48. YÊU CẦU TRIỂN KHAI CUỐI CÙNG
+
+Đây là task **implementation**, không phải task tư vấn.
+
+Sau khi đọc source:
+
+**hãy thực sự sửa code.**
+
+Không chỉ trả pseudo-code.
+
+Không chỉ mô tả kiến trúc.
+
+Không dừng lại để hỏi những thứ có thể xác định trực tiếp từ source.
+
+Chỉ hỏi khi gặp requirement thực sự không thể xác định và việc tự đoán có nguy cơ làm sai behavior.
+
+Ưu tiên:
+
+```text
+Correctness
+> Isolation giữa Profile
+> Stability
+> Stop responsiveness
+> Performance
+> UI appearance
+```
