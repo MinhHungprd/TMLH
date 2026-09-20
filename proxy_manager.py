@@ -539,3 +539,50 @@ def apply_proxy_routing(
         )
 
     return executable
+
+
+
+def routing_config_matches(
+    profiles,
+    settings: ProxySettings,
+) -> bool:
+    """
+    True when ProxiFyre's active app-config.json exactly matches the routing
+    configuration generated from the current profile list and saved proxies.
+    """
+    if not settings.proxies:
+        return True
+
+    try:
+        executable = validate_proxifyre_executable(
+            settings.proxifyre_path
+        )
+    except (ValueError, OSError):
+        return False
+
+    config_path = (
+        executable.parent
+        / "app-config.json"
+    )
+
+    if not config_path.is_file():
+        return False
+
+    try:
+        current = json.loads(
+            config_path.read_text(
+                encoding="utf-8",
+            )
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ):
+        return False
+
+    expected = build_proxifyre_config(
+        profiles,
+        settings.proxies,
+    )
+
+    return current == expected
