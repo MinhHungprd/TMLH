@@ -59,3 +59,78 @@ def test_set_profile_window_title_uses_profile_name():
         123,
         "Acc 01",
     )
+
+
+
+def test_boss_scan_reveal_height_includes_client_top_and_hp_roi():
+    from window_manager import boss_scan_reveal_height
+
+    with patch(
+        "window_manager.win32gui.IsWindow",
+        return_value=True,
+    ), patch(
+        "window_manager.win32gui.GetWindowRect",
+        return_value=(10, 20, 350, 240),
+    ), patch(
+        "window_manager.get_client_size",
+        return_value=(320, 180),
+    ), patch(
+        "window_manager.win32gui.ClientToScreen",
+        return_value=(14, 50),
+    ):
+        reveal = boss_scan_reveal_height(
+            123,
+            padding=4,
+        )
+
+    # title/client offset 30 + scaled boss y/h (3 + 8) + padding 4
+    assert reveal == 45
+
+
+def test_non_boss_window_visible_is_noop_when_stack_mode_is_off():
+    from window_manager import (
+        clear_boss_stack_order,
+        non_boss_window_visible,
+    )
+
+    clear_boss_stack_order()
+
+    with patch(
+        "window_manager.win32gui.SetWindowPos"
+    ) as set_pos:
+        with non_boss_window_visible(123):
+            pass
+
+    set_pos.assert_not_called()
+
+
+def test_non_boss_window_visible_raises_then_restores_stack_position():
+    from window_manager import (
+        clear_boss_stack_order,
+        non_boss_window_visible,
+        set_boss_stack_order,
+    )
+
+    with patch(
+        "window_manager.win32gui.IsWindow",
+        return_value=True,
+    ), patch(
+        "window_manager.win32gui.SetWindowPos"
+    ) as set_pos:
+        set_boss_stack_order(
+            [101, 102, 103]
+        )
+
+        with non_boss_window_visible(102):
+            pass
+
+        assert set_pos.call_count == 2
+
+        # First call raises 102 to topmost.
+        assert set_pos.call_args_list[0].args[0] == 102
+
+        # Restore puts 102 behind the window that should stay above it (103).
+        assert set_pos.call_args_list[1].args[0] == 102
+        assert set_pos.call_args_list[1].args[1] == 103
+
+    clear_boss_stack_order()
