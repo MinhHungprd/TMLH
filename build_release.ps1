@@ -228,14 +228,16 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
 
 root = Path(SPECPATH)
-frida_datas, frida_binaries, frida_hiddenimports = collect_all("frida")\nctk_datas, ctk_binaries, ctk_hiddenimports = collect_all("customtkinter")
+frida_datas, frida_binaries, frida_hiddenimports = collect_all("frida")
+ctk_datas, ctk_binaries, ctk_hiddenimports = collect_all("customtkinter")
 
 datas = [
     (str(root / "assets"), "assets"),
     (str(root / "boss" / "enter_boss.js"), "boss"),
     (str(root / "vendor" / "Tesseract-OCR"), "tesseract"),
 ]
-datas += frida_datas\ndatas += ctk_datas
+datas += frida_datas
+datas += ctk_datas
 
 a = Analysis(
     [str(root / "build_entry.py")],
