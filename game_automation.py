@@ -16,9 +16,11 @@ from boss_detector import BossDetector
 from game_state import CLICK_CENTER, GameStateDetector
 from input_manager import InputManager
 from profile_manager import MissingGameFilesError
-from window_manager import acquire_profile_window, resize_client
+
+from profile_auth import restore_profile_auth
 
 from window_manager import (
+    PROFILE_LAUNCH_LOCK,
     acquire_profile_window,
     ensure_client_size,
     resize_client,
@@ -29,9 +31,21 @@ def interruptible_wait(seconds, stop_event):
 
 class GameLifecycle:
     def open(self, context):
-        if not (Path(context.game_path) / "ThienMenhLacHong_Launcher.exe").is_file():
-            raise MissingGameFilesError(context.game_path)
-        return acquire_profile_window(context.game_path, context.stop_event)
+        if not (
+            Path(context.game_path)
+            / "ThienMenhLacHong_Launcher.exe"
+        ).is_file():
+            raise MissingGameFilesError(
+                context.game_path
+            )
+
+        return acquire_profile_window(
+            context.game_path,
+            context.stop_event,
+            before_launch=lambda: restore_profile_auth(
+                context.game_path
+            ),
+        )
 
     def resize(self, context):
         resize_client(context.window_handle, context.window_width, context.window_height)
@@ -151,16 +165,36 @@ class AutomationWorker:
             if self._halted():
                 return
             self._state("LAUNCHING_GAME")
-            pid, hwnd, launched = self.lifecycle.open(self.context)
-            self.context.process_id = pid
-            self.context.window_handle = hwnd
-            if self._halted():
-                return
-            self.lifecycle.resize(self.context)
-            if launched:
-                self._state("WAITING_STARTUP")
-                if self.wait(GAME_START_WAIT, self.context.stop_event):
+
+            # Registry login của game là global theo Windows user.
+            #
+            # Vì vậy:
+            #   restore A -> launch A -> đợi A load
+            # rồi mới:
+            #   restore B -> launch B
+            #
+            # Không được launch hai profile đồng thời ở bước này.
+            with PROFILE_LAUNCH_LOCK:
+                pid, hwnd, launched = self.lifecycle.open(
+                    self.context
+                )
+
+                self.context.process_id = pid
+                self.context.window_handle = hwnd
+
+                if self._halted():
                     return
+
+                self.lifecycle.resize(self.context)
+
+                if launched:
+                    self._state("WAITING_STARTUP")
+
+                    if self.wait(
+                        GAME_START_WAIT,
+                        self.context.stop_event,
+                    ):
+                        return
             while not self._halted():
                 if not self._ensure_in_game():
                     break

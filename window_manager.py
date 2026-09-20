@@ -1,4 +1,5 @@
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -6,7 +7,7 @@ import psutil
 import win32con
 import win32gui
 import win32process
-
+PROFILE_LAUNCH_LOCK = threading.Lock()
 
 def launch_profile(profile):
     path = Path(profile.game_path)
@@ -81,7 +82,12 @@ def set_window_topmost(hwnd: int, enabled: bool = True) -> None:
         | win32con.SWP_NOSIZE
         | win32con.SWP_NOACTIVATE,
     )
-def acquire_profile_window(game_path, stop_event, timeout=30):
+def acquire_profile_window(
+    game_path,
+    stop_event,
+    timeout=30,
+    before_launch=None,):
+
     """Find a process inside this clone or launch it, then bind its own HWND."""
     clone = Path(game_path).resolve()
     launcher = clone / "ThienMenhLacHong_Launcher.exe"
@@ -92,7 +98,18 @@ def acquire_profile_window(game_path, stop_event, timeout=30):
     launcher_process = next((p for p in own_processes if p.name().lower() == launcher.name.lower()), None)
     launched = game_process is None and launcher_process is None
     if launched:
-        launcher_pid = subprocess.Popen([str(launcher)], cwd=str(clone)).pid
+        if before_launch is not None:
+            before_launch()
+
+        if stop_event.is_set():
+            raise InterruptedError(
+                "Profile launch cancelled"
+            )
+
+        launcher_pid = subprocess.Popen(
+            [str(launcher)],
+            cwd=str(clone),
+        ).pid
     else:
         launcher_pid = launcher_process.pid if launcher_process else None
     deadline = time.monotonic() + timeout

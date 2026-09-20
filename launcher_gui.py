@@ -17,17 +17,25 @@ from profile_storage import ProfileStorage
 from window_layout import arrange_windows
 
 from window_manager import (
+    PROFILE_LAUNCH_LOCK,
     acquire_profile_window,
     resize_client,
     set_window_topmost,
 )
-
+from profile_auth import save_profile_auth
 
 SIZES = tuple(f"{w}x{h}" for w, h in RESOLUTIONS)
 
 
 class ProfileController:
-    def __init__(self, bot_root, profile_store=None, settings_store=None, worker_factory=AutomationWorker):
+    def __init__(
+        self,
+        bot_root,
+        profile_store=None,
+        settings_store=None,
+        worker_factory=AutomationWorker,
+        auth_saver=None,
+    ):
         self.manager = ProfileManager(Path(bot_root))
         self.profile_store = profile_store or ProfileStorage(Path(bot_root) / "profiles.json")
         self.settings_store = settings_store or AppSettingsStorage(Path(bot_root) / "settings.json")
@@ -35,6 +43,10 @@ class ProfileController:
         self.workers = {}
         self.worker_factory = worker_factory
         self._storage_lock = threading.RLock()
+        self.auth_saver = (
+            auth_saver
+            or save_profile_auth
+        )
 
     def get(self, profile_id):
         with self._storage_lock:
@@ -55,8 +67,21 @@ class ProfileController:
 
     def confirm_login(self, profile_id):
         profile = self.get(profile_id)
+
         self.manager.check_clone(profile)
-        return self._replace(replace(profile, login_ready=True))
+
+        # Account hiện đang login trong game được lưu
+        # thành auth riêng của profile.
+        self.auth_saver(
+            profile.game_path
+        )
+
+        return self._replace(
+            replace(
+                profile,
+                login_ready=True,
+            )
+        )
 
     def repair_profile(self, profile_id, source_path):
         profile = self.get(profile_id)
@@ -352,13 +377,17 @@ class LauncherApp(tk.Tk):
         try:
             profile_id = self._selected_profile()
             profile = self.controller.get(profile_id)
-            if profile.login_ready:
-                raise ValueError("Profile is already ready")
-            self.controller.manager.check_clone(profile)
-            self._open_for_login(profile)
-        except (ValueError, OSError) as exc:
-            messagebox.showerror("Continue login", str(exc), parent=self)
 
+            self.controller.manager.check_clone(profile)
+
+            self._open_for_login(profile)
+
+        except (ValueError, OSError) as exc:
+            messagebox.showerror(
+                "Continue login",
+                str(exc),
+                parent=self,
+            )
     def _open_for_login(self, profile):
         cancel = threading.Event()
         self.creation_events[profile.profile_id] = cancel
@@ -366,12 +395,29 @@ class LauncherApp(tk.Tk):
         def work():
             try:
                 self.after(0, self._status, profile.profile_id, "Launching Game")
-                _pid, _hwnd, launched = acquire_profile_window(profile.game_path, cancel)
-                set_window_topmost(_hwnd, True)
-                if launched:
-                    self.after(0, self._status, profile.profile_id, "Waiting Startup")
-                    if cancel.wait(10):
-                        return
+                with PROFILE_LAUNCH_LOCK:
+                    _pid, _hwnd, launched = (
+                        acquire_profile_window(
+                            profile.game_path,
+                            cancel,
+                        )
+                    )
+
+                    set_window_topmost(
+                        _hwnd,
+                        True,
+                    )
+
+                    if launched:
+                        self.after(
+                            0,
+                            self._status,
+                            profile.profile_id,
+                            "Waiting Startup",
+                        )
+
+                        if cancel.wait(10):
+                            return
                 if not cancel.is_set():
                     self.after(0, self._status, profile.profile_id, "Waiting Login")
             except Exception as exc:

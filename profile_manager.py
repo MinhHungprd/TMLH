@@ -70,7 +70,13 @@ class ProfileManager:
         if source.is_relative_to(destination) or destination.is_relative_to(source):
             raise ValueError("Game source and clone must be separate directories")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source, destination)
+        shutil.copytree(
+            source,
+            destination,
+            ignore=shutil.ignore_patterns(
+                ".tmlh_profile_auth.bin",
+            ),
+        )
 
     def create_profile(self, name: str, source_path: Path) -> Profile:
         profile = self.prepare_profile(name, source_path, [])
@@ -85,4 +91,11 @@ class ProfileManager:
     def repair_profile(self, profile: Profile, source_path: Path) -> None:
         source = validate_source_path(source_path)
         destination = self._checked_destination(profile)
-        shutil.copytree(source, destination, dirs_exist_ok=True)
+        shutil.copytree(
+            source,
+            destination,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(
+                ".tmlh_profile_auth.bin",
+            ),
+        )
