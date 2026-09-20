@@ -351,11 +351,6 @@ def write_runtime_config(
     profiles,
     settings: ProxySettings,
 ) -> Path:
-    if not settings.proxies:
-        raise ValueError(
-            "Chưa nhập SOCKS5 proxy"
-        )
-
     config = build_proxifyre_config(
         profiles,
         settings.proxies,
@@ -369,6 +364,16 @@ def write_runtime_config(
         parents=True,
         exist_ok=True,
     )
+
+    # Remove abandoned plaintext runtime configs from a cancelled/failed
+    # previous Apply attempt before writing a new one.
+    for old in runtime_dir.glob(
+        "proxifyre_*.json"
+    ):
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
     fd, temp_name = tempfile.mkstemp(
         prefix="proxifyre_",
@@ -550,7 +555,10 @@ def routing_config_matches(
     True when ProxiFyre's active app-config.json exactly matches the routing
     configuration generated from the current profile list and saved proxies.
     """
-    if not settings.proxies:
+    if (
+        not settings.proxies
+        and not settings.proxifyre_path.strip()
+    ):
         return True
 
     try:
