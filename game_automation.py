@@ -12,6 +12,8 @@ from automation_constants import (
     BOSS_ENTER_WAIT,
     BOSS_OCR_INTERVAL,
     BOSS_RESPAWN_WAIT,
+    BOSS_SCAN_STAGGER_SLOTS,
+    BOSS_SCAN_STAGGER_STEP,
     GAME_START_WAIT,
     IN_GAME_CONFIRM_SECONDS,
 )
@@ -37,6 +39,30 @@ from window_manager import (
 
 def interruptible_wait(seconds, stop_event):
     return stop_event.wait(seconds)
+
+
+_BOSS_SCAN_STAGGER_LOCK = threading.Lock()
+_BOSS_SCAN_STAGGER_NEXT_SLOT = 0
+
+
+def reserve_boss_scan_stagger() -> float:
+    """
+    Assign workers a small one-time scan phase offset.
+
+    With the default 10 slots, workers are spread across one second:
+    0.0s, 0.1s, ... 0.9s. Each worker still scans at the same
+    BOSS_OCR_INTERVAL afterwards.
+    """
+    global _BOSS_SCAN_STAGGER_NEXT_SLOT
+
+    with _BOSS_SCAN_STAGGER_LOCK:
+        slot = (
+            _BOSS_SCAN_STAGGER_NEXT_SLOT
+            % BOSS_SCAN_STAGGER_SLOTS
+        )
+        _BOSS_SCAN_STAGGER_NEXT_SLOT += 1
+
+    return slot * BOSS_SCAN_STAGGER_STEP
 
 
 class GameLifecycle:
@@ -115,6 +141,7 @@ class AutomationWorker:
         now=None,
         gameplay_ready=None,
         on_log=None,
+        boss_scan_stagger=None,
     ):
         self.context = context
 
@@ -192,6 +219,16 @@ class AutomationWorker:
         )
 
         self.thread = None
+
+        self.boss_scan_stagger = (
+            reserve_boss_scan_stagger()
+            if boss_scan_stagger is None
+            else max(
+                0.0,
+                float(boss_scan_stagger),
+            )
+        )
+        self._boss_scan_stagger_applied = False
 
         # Diagnostic OCR logs are useful, but logging every alive scan from
         # many profiles wastes GUI/queue work. Dead-candidate scans still log
@@ -571,6 +608,26 @@ class AutomationWorker:
                 self.context.boss_dead_streak = 0
 
                 dead_candidate_since = None
+
+                # Apply the phase offset only once for this worker. After
+                # that, the existing 1-second scan cadence keeps profiles
+                # naturally separated without changing death confirmation.
+                if (
+                    not self._boss_scan_stagger_applied
+                    and self.boss_scan_stagger > 0
+                ):
+                    if self.wait(
+                        self.boss_scan_stagger,
+                        self.context.stop_event,
+                    ):
+                        break
+
+                    self._boss_scan_stagger_applied = True
+
+                    if self._halted():
+                        break
+                else:
+                    self._boss_scan_stagger_applied = True
 
                 self._state(
                     "CHECKING_BOSS"
