@@ -19,6 +19,11 @@ from window_manager import (
     acquire_profile_window,
     set_window_topmost,
 )
+from window_manager import (
+    acquire_profile_window,
+    resize_client,
+    set_window_topmost,
+)
 
 
 SIZES = tuple(f"{w}x{h}" for w, h in RESOLUTIONS)
@@ -65,10 +70,57 @@ class ProfileController:
     def set_options(self, profile_id, boss, size):
         if boss not in BOSSES or size not in SIZES:
             raise ValueError("Invalid boss or resolution")
-        profile = self.get(profile_id)
-        width, height = (int(part) for part in size.split("x"))
-        return self._replace(replace(profile, selected_boss=boss, window_width=width, window_height=height))
 
+        profile = self.get(profile_id)
+
+        width, height = (
+            int(part)
+            for part in size.split("x")
+        )
+
+        updated = self._replace(
+            replace(
+                profile,
+                selected_boss=boss,
+                window_width=width,
+                window_height=height,
+            )
+        )
+
+        # Nếu profile đang chạy thì cập nhật runtime ngay.
+        worker = self.workers.get(profile_id)
+
+        if worker is not None:
+            context = worker.context
+
+            context.selected_boss = boss
+            context.window_width = width
+            context.window_height = height
+
+            hwnd = context.window_handle
+
+            if (
+                hwnd
+                and not context.stop_event.is_set()
+                and context.state not in ("STOPPED", "ERROR")
+            ):
+                try:
+                    actual_width, actual_height = resize_client(
+                        hwnd,
+                        width,
+                        height,
+                    )
+
+                    # Runtime luôn phản ánh kích thước THỰC của client.
+                    context.window_width = actual_width
+                    context.window_height = actual_height
+
+                    set_window_topmost(hwnd, True)
+
+                except (ValueError, OSError):
+                    pass
+
+        return updated
     def start_selected(self, profile_ids, choices=None, on_status=None, on_error=None):
         started = []
         for profile_id in profile_ids:
@@ -153,7 +205,23 @@ class LauncherApp(tk.Tk):
         ttk.Label(options, text="Selected profile Boss").pack(side="left")
         ttk.Combobox(options, textvariable=self.boss, values=tuple(BOSSES), state="readonly", width=16).pack(side="left", padx=5)
         ttk.Label(options, text="Size").pack(side="left")
-        ttk.Combobox(options, textvariable=self.size, values=SIZES, state="readonly", width=10).pack(side="left", padx=5)
+        self.size_combo = ttk.Combobox(
+            options,
+            textvariable=self.size,
+            values=SIZES,
+            state="readonly",
+            width=10,
+        )
+
+        self.size_combo.pack(
+            side="left",
+            padx=5,
+        )
+
+        self.size_combo.bind(
+            "<<ComboboxSelected>>",
+            self._resolution_changed,
+        )
         ttk.Button(options, text="Save options", command=self._save_options).pack(side="left")
         actions = ttk.Frame(root)
         actions.pack(fill="x", pady=5)
@@ -302,10 +370,35 @@ class LauncherApp(tk.Tk):
     def _save_options(self):
         try:
             profile_id = self._selected_profile()
-            self.controller.set_options(profile_id, self.boss.get(), self.size.get())
+
+            profile = self.controller.set_options(
+                profile_id,
+                self.boss.get(),
+                self.size.get(),
+            )
+
             self._refresh()
+            self._arrange_windows()
+
+            worker = self.controller.workers.get(profile_id)
+
+            if worker:
+                self._log(
+                    profile.profile_name,
+                    "Options",
+                    (
+                        f"Boss={profile.selected_boss}, "
+                        f"Size={worker.context.window_width}"
+                        f"x{worker.context.window_height}"
+                    ),
+                )
+
         except (ValueError, OSError) as exc:
-            messagebox.showerror("Profile options", str(exc), parent=self)
+            messagebox.showerror(
+                "Profile options",
+                str(exc),
+                parent=self,
+            )
 
     def _start_selected(self):
         if not self.checked:
@@ -479,7 +572,43 @@ class LauncherApp(tk.Tk):
                     pass
 
         self.destroy()
+    def _resolution_changed(self, _event=None):
+        try:
+            profile_id = self._selected_profile()
 
+            profile = self.controller.set_options(
+                profile_id,
+                self.boss.get(),
+                self.size.get(),
+            )
+
+            worker = self.controller.workers.get(profile_id)
+
+            if worker is not None:
+                context = worker.context
+
+                self._log(
+                    profile.profile_name,
+                    "Resize",
+                    (
+                        f"requested="
+                        f"{profile.window_width}x{profile.window_height}, "
+                        f"runtime="
+                        f"{context.window_width}x{context.window_height}"
+                    ),
+                )
+
+            self._refresh()
+
+            # Sau resize phải arrange lại tất cả game.
+            self._arrange_windows()
+
+        except (ValueError, OSError) as exc:
+            messagebox.showerror(
+                "Resolution",
+                str(exc),
+                parent=self,
+            )
 
 if __name__ == "__main__":
     LauncherApp().mainloop()

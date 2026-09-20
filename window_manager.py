@@ -118,21 +118,46 @@ def acquire_profile_window(game_path, stop_event, timeout=30):
         raise InterruptedError("Profile launch cancelled")
     raise TimeoutError(f"No game window for clone: {clone}")
 
+def get_client_size(hwnd: int) -> tuple[int, int]:
+    if not hwnd or not win32gui.IsWindow(hwnd):
+        raise ValueError(f"Invalid HWND: {hwnd}")
 
-def resize_client(hwnd: int, width: int, height: int) -> None:
+    left, top, right, bottom = win32gui.GetClientRect(hwnd)
+
+    return right - left, bottom - top
+
+def resize_client(hwnd: int, width: int, height: int) -> tuple[int, int]:
+    if not hwnd or not win32gui.IsWindow(hwnd):
+        raise ValueError(f"Invalid HWND: {hwnd}")
+
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-    client = win32gui.GetClientRect(hwnd)
 
-    outer_width = right - left + width - client[2]
-    outer_height = bottom - top + height - client[3]
+    client_left, client_top, client_right, client_bottom = (
+        win32gui.GetClientRect(hwnd)
+    )
+
+    current_client_width = client_right - client_left
+    current_client_height = client_bottom - client_top
+
+    current_outer_width = right - left
+    current_outer_height = bottom - top
+
+    border_width = current_outer_width - current_client_width
+    border_height = current_outer_height - current_client_height
+
+    target_outer_width = width + border_width
+    target_outer_height = height + border_height
 
     win32gui.SetWindowPos(
         hwnd,
         0,
         left,
         top,
-        outer_width,
-        outer_height,
+        target_outer_width,
+        target_outer_height,
         win32con.SWP_NOZORDER
         | win32con.SWP_NOACTIVATE,
     )
+
+    # Quan trọng: đọc lại kích thước client THỰC TẾ sau resize.
+    return get_client_size(hwnd)

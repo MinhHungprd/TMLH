@@ -49,7 +49,24 @@ class GameStateDetector:
         return score >= 0.90
 
     def check_signals(self, context):
-        image = None if self.matcher is not None else self.capture(context.window_handle)
-        width, height = (context.window_width, context.window_height) if image is None else (image.shape[1], image.shape[0])
-        return [self.inspect(name, scale_roi(roi, width, height), image, asset)
-                for name, asset, roi in self.SIGNALS]
+        image = (
+            None
+            if self.matcher is not None
+            else self.capture(context.window_handle)
+        )
+
+        width, height = (
+            (context.window_width, context.window_height)
+            if image is None
+            else (image.shape[1], image.shape[0])
+        )
+
+        return [
+            self.inspect(
+                name,
+                scale_roi(roi, width, height),
+                image,
+                asset,
+            )
+            for name, asset, roi in self.SIGNALS
+        ]
