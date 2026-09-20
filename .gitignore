@@ -5,6 +5,8 @@ Game/profiles/
 # Local data
 profiles.json
 settings.json
+.tmlh_proxy_settings.bin
+proxy_runtime/
 
 # Debug
 debug/
