@@ -6,3 +6,4 @@ Pillow
 psutil
 pywin32
 frida-tools
+customtkinter
