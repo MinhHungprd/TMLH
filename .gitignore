@@ -1,8 +1,29 @@
 # Generated game profile clones
 Game/profiles/
+**/.tmlh_profile_auth.bin
 
-# Local profile/settings data
+# Local data
 profiles.json
+settings.json
+
+# Debug
+debug/
+debug/**
+
+# Build / release
+build/
+dist/
+release/
+.release_work/
+
+# PyInstaller
+*.spec
+
+# Virtual environments
+.venv/
+.venv-build/
+venv/
+env/
 
 # Python cache
 __pycache__/
@@ -10,21 +31,20 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
-# Virtual environments
-.venv/
-venv/
-env/
-
-# Logs/temp
+# Logs / temp
 *.log
 *.tmp
 *.temp
+*.bak
 
-# Environment/secrets
+# Environment / secrets
 .env
+.env.*
+!.env.example
 
 # IDE / OS
 .idea/
 .vscode/
 Thumbs.db
+Desktop.ini
 .DS_Store

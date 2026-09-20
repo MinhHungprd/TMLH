@@ -22,7 +22,6 @@ import frida
 import psutil
 
 
-GAME_SERVER_IP = "14.225.213.205"
 GAMEPLAY_PORT = 1002
 LOGIN_PORT = 8001
 
@@ -57,31 +56,38 @@ def parse_packet(hexstr: str):
     return plen, group, opcode, hexstr[24:]
 
 
-def discover_game_remote(process: psutil.Process) -> dict:
+def discover_game_remote(
+    process: psutil.Process,
+) -> dict:
     """
-    Tìm socket gameplay của đúng PID/profile.
+    Tìm gameplay socket :1002
+    của đúng PID/profile.
 
-    8001 = login
-    1002 = ingame/gameplay
+    IP gameplay được lấy động tại runtime.
     """
 
     connections = []
 
-    for conn in process.net_connections(kind="tcp"):
+    for conn in process.net_connections(
+        kind="tcp"
+    ):
         if not conn.raddr:
             continue
 
-        if conn.status != psutil.CONN_ESTABLISHED:
-            continue
-
-        if conn.raddr.ip != GAME_SERVER_IP:
+        if (
+            conn.status
+            != psutil.CONN_ESTABLISHED
+        ):
             continue
 
         connections.append(
-            (conn.raddr.ip, conn.raddr.port)
+            (
+                conn.raddr.ip,
+                conn.raddr.port,
+            )
         )
 
-    # Socket gameplay có ưu tiên tuyệt đối.
+    # Tìm gameplay socket :1002.
     for ip, port in connections:
         if port == GAMEPLAY_PORT:
             return {
@@ -89,44 +95,72 @@ def discover_game_remote(process: psutil.Process) -> dict:
                 "port": port,
             }
 
-    # Có server socket nhưng chưa thấy gameplay.
+    # Có connection nhưng chưa có :1002.
     if connections:
         candidates = ", ".join(
             f"{ip}:{port}"
-            for ip, port in sorted(set(connections))
+            for ip, port
+            in sorted(
+                set(connections)
+            )
         )
 
         raise RuntimeError(
-            f"PID {process.pid} chưa có socket ingame "
-            f"{GAME_SERVER_IP}:{GAMEPLAY_PORT}. "
-            f"Socket hiện tại: {candidates}"
+            (
+                f"PID {process.pid} "
+                f"chưa có gameplay socket "
+                f":{GAMEPLAY_PORT}. "
+                f"Socket hiện tại: "
+                f"{candidates}"
+            )
         )
 
     raise RuntimeError(
-        f"PID {process.pid} chưa có kết nối tới "
-        f"game server {GAME_SERVER_IP}"
+        (
+            f"PID {process.pid} "
+            "không có TCP connection "
+            "ESTABLISHED"
+        )
     )
 
 def has_gameplay_socket(pid: int) -> bool:
     """
-    True khi đúng PID đã có socket gameplay :1002.
-    Không coi :8001 là ingame.
+    True khi đúng PID game có TCP gameplay socket :1002.
+
+    Không khóa IP server vì IP gameplay có thể
+    khác nhau theo máy/mạng/server route.
     """
     try:
         process = psutil.Process(pid)
 
-        for conn in process.net_connections(kind="tcp"):
+        for conn in process.net_connections(
+            kind="tcp"
+        ):
             if not conn.raddr:
                 continue
 
-            if conn.status != psutil.CONN_ESTABLISHED:
+            if (
+                conn.status
+                != psutil.CONN_ESTABLISHED
+            ):
                 continue
 
             if (
-                conn.raddr.ip == GAME_SERVER_IP
-                and conn.raddr.port == GAMEPLAY_PORT
+                conn.raddr.port
+                == GAMEPLAY_PORT
             ):
                 return True
+
+    except psutil.NoSuchProcess:
+        return False
+
+    except psutil.AccessDenied as exc:
+        raise RuntimeError(
+            (
+                f"Không có quyền đọc socket "
+                f"của game PID {pid}"
+            )
+        ) from exc
 
     except psutil.Error:
         return False
