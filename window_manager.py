@@ -204,3 +204,53 @@ def ensure_client_size(
     set_window_topmost(hwnd, True)
 
     return True
+def has_remote_port(
+    pid: int,
+    remote_ip: str,
+    remote_port: int,
+) -> bool:
+    try:
+        process = psutil.Process(pid)
+
+        for conn in process.net_connections(kind="tcp"):
+            if not conn.raddr:
+                continue
+
+            if conn.status != psutil.CONN_ESTABLISHED:
+                continue
+
+            if (
+                conn.raddr.ip == remote_ip
+                and conn.raddr.port == remote_port
+            ):
+                return True
+
+    except psutil.Error:
+        return False
+
+    return False
+
+
+def wait_for_remote_port(
+    pid: int,
+    remote_ip: str,
+    remote_port: int,
+    stop_event,
+    timeout: float = 35.0,
+) -> bool:
+    deadline = time.monotonic() + timeout
+
+    while (
+        time.monotonic() < deadline
+        and not stop_event.is_set()
+    ):
+        if has_remote_port(
+            pid,
+            remote_ip,
+            remote_port,
+        ):
+            return True
+
+        stop_event.wait(0.25)
+
+    return False

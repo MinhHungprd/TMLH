@@ -24,7 +24,10 @@ from window_manager import (
     acquire_profile_window,
     ensure_client_size,
     resize_client,
+    wait_for_remote_port,
 )
+GAME_SERVER_IP = "14.225.213.205"
+GAMEPLAY_PORT = 1002
 def interruptible_wait(seconds, stop_event):
     return stop_event.wait(seconds)
 
@@ -190,11 +193,26 @@ class AutomationWorker:
                 if launched:
                     self._state("WAITING_STARTUP")
 
-                    if self.wait(
-                        GAME_START_WAIT,
+                    # Không được restore account của profile tiếp theo
+                    # cho tới khi profile này thực sự vào gameplay.
+                    ready = wait_for_remote_port(
+                        pid,
+                        GAME_SERVER_IP,
+                        GAMEPLAY_PORT,
                         self.context.stop_event,
-                    ):
+                        timeout=35.0,
+                    )
+
+                    if self._halted():
                         return
+
+                    if not ready:
+                        raise RuntimeError(
+                            f"{self.context.profile_name}: "
+                            f"không vào được ingame socket "
+                            f"{GAME_SERVER_IP}:{GAMEPLAY_PORT} "
+                            f"sau khi restore account"
+                        )
             while not self._halted():
                 if not self._ensure_in_game():
                     break
