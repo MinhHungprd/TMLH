@@ -306,7 +306,7 @@ class LauncherApp(ctk.CTk):
 
         self.source = tk.StringVar(value=settings.game_source_path)
         self.profile_name = tk.StringVar()
-        self.sort_mode = tk.StringVar(value="Tên A → Z")
+        self.sort_mode = tk.StringVar(value="A→Z")
 
         self.statuses = {}
         self.checked = set()
@@ -315,8 +315,8 @@ class LauncherApp(ctk.CTk):
         self.selected_profile_id = None
 
         self.title(f"{APP_NAME} - Profile Bot")
-        self.geometry("500x620")
-        self.minsize(480, 560)
+        self.geometry("480x620")
+        self.minsize(460, 560)
         self.configure(fg_color=COLORS["bg"])
 
         self.grid_columnconfigure(0, weight=1)
@@ -391,10 +391,10 @@ class LauncherApp(ctk.CTk):
 
         ctk.CTkLabel(
             card,
-            text="🎮  Game",
+            text="🎮 Game",
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=10, weight="bold"),
-            width=72,
+            font=ctk.CTkFont(size=9, weight="bold"),
+            width=64,
             anchor="w",
         ).grid(row=0, column=0, padx=(10, 4), pady=7)
 
@@ -405,7 +405,7 @@ class LauncherApp(ctk.CTk):
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=10),
+            font=ctk.CTkFont(size=9),
         )
         self.source_entry.grid(row=0, column=1, sticky="ew", padx=3, pady=6)
         self.source_entry.bind("<FocusOut>", lambda _event: self._update_source_status())
@@ -413,7 +413,7 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             card,
             text="Chọn",
-            width=48,
+            width=46,
             height=28,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
@@ -427,7 +427,7 @@ class LauncherApp(ctk.CTk):
             text="● Chưa",
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=8, weight="bold"),
-            width=62,
+            width=50,
             anchor="w",
         )
         self.source_status.grid(row=0, column=3, padx=(4, 8), pady=7)
@@ -440,7 +440,7 @@ class LauncherApp(ctk.CTk):
 
         ctk.CTkLabel(
             card,
-            text="👤+  Profile",
+            text="👤 Profile",
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=10, weight="bold"),
             width=72,
@@ -455,14 +455,14 @@ class LauncherApp(ctk.CTk):
             border_color=COLORS["border_bright"],
             placeholder_text="Tên profile...",
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=10),
+            font=ctk.CTkFont(size=9),
         )
         self.profile_entry.grid(row=0, column=1, sticky="ew", padx=3, pady=6)
 
         ctk.CTkButton(
             card,
             text="+",
-            width=34,
+            width=32,
             height=28,
             fg_color=COLORS["blue"],
             hover_color=COLORS["blue_hover"],
@@ -472,7 +472,7 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             card,
             text="Mở",
-            width=42,
+            width=40,
             height=28,
             fg_color=COLORS["purple"],
             hover_color=COLORS["purple_hover"],
@@ -481,8 +481,8 @@ class LauncherApp(ctk.CTk):
 
         ctk.CTkButton(
             card,
-            text="Login ✓",
-            width=52,
+            text="Login",
+            width=48,
             height=28,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
@@ -509,7 +509,7 @@ class LauncherApp(ctk.CTk):
 
         ctk.CTkLabel(
             top,
-            text="Sort:",
+            text="Sort",
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=8),
         ).grid(row=0, column=1, padx=(8, 4))
@@ -517,8 +517,8 @@ class LauncherApp(ctk.CTk):
         self.sort_combo = ctk.CTkComboBox(
             top,
             variable=self.sort_mode,
-            values=("Tên A → Z", "Tên Z → A", "Trạng thái"),
-            width=82,
+            values=("A→Z", "Z→A", "TT"),
+            width=70,
             height=24,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
@@ -539,12 +539,12 @@ class LauncherApp(ctk.CTk):
         header.grid_propagate(False)
 
         columns = (
-            ("", 24),
-            ("Profile", 86),
-            ("Trạng thái", 72),
-            ("Boss", 78),
-            ("Size", 62),
-            ("Thao tác", 112),
+            ("", 22),
+            ("Profile", 82),
+            ("TT", 54),
+            ("Boss", 84),
+            ("Size", 70),
+            ("Ctrl", 92),
         )
         for index, (label, width) in enumerate(columns):
             header.grid_columnconfigure(index, minsize=width, weight=1 if index == 1 else 0)
@@ -581,8 +581,8 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             bulk,
             text="Tất cả",
-            width=58,
-            height=24,
+            width=50,
+            height=22,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
             command=self._select_all,
@@ -591,8 +591,8 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             bulk,
             text="Bỏ",
-            width=46,
-            height=24,
+            width=34,
+            height=22,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
             command=self._clear_selection,
@@ -601,8 +601,8 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             bulk,
             text="Xóa",
-            width=42,
-            height=24,
+            width=38,
+            height=22,
             fg_color="#35121B",
             hover_color=COLORS["red_hover"],
             text_color=COLORS["red"],
@@ -610,45 +610,45 @@ class LauncherApp(ctk.CTk):
         ).grid(row=0, column=3, padx=(3, 0))
 
     def _build_action_bar(self):
-        bar = CompactCard(self, height=46)
+        bar = CompactCard(self, height=42)
         bar.grid(row=4, column=0, sticky="ew", padx=8, pady=3)
         bar.grid_propagate(False)
         bar.grid_columnconfigure((0, 1, 2), weight=1)
 
         ctk.CTkButton(
             bar,
-            text="▶  Bắt đầu",
+            text="▶ Start",
             height=24,
             fg_color=COLORS["cyan"],
             hover_color=COLORS["blue"],
             text_color=COLORS["black"],
             font=ctk.CTkFont(size=10, weight="bold"),
             command=self._start_selected,
-        ).grid(row=0, column=0, sticky="ew", padx=(10, 5), pady=10)
+        ).grid(row=0, column=0, sticky="ew", padx=(8, 4), pady=8)
 
         ctk.CTkButton(
             bar,
-            text="■  Dừng",
+            text="■ Stop",
             height=24,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["red_hover"],
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=10, weight="bold"),
             command=self._stop_selected,
-        ).grid(row=0, column=1, sticky="ew", padx=5, pady=10)
+        ).grid(row=0, column=1, sticky="ew", padx=4, pady=8)
 
         ctk.CTkButton(
             bar,
-            text="▣  Sắp xếp cửa sổ",
+            text="▣ Xếp cửa sổ",
             height=24,
             fg_color=COLORS["purple"],
             hover_color=COLORS["purple_hover"],
             font=ctk.CTkFont(size=9, weight="bold"),
             command=self._arrange_windows,
-        ).grid(row=0, column=2, sticky="ew", padx=(5, 10), pady=10)
+        ).grid(row=0, column=2, sticky="ew", padx=(4, 8), pady=8)
 
     def _build_log_panel(self):
-        panel = CompactCard(self, height=106)
+        panel = CompactCard(self, height=96)
         panel.grid(row=5, column=0, sticky="ew", padx=8, pady=3)
         panel.grid_propagate(False)
         panel.grid_columnconfigure(0, weight=1)
@@ -676,7 +676,7 @@ class LauncherApp(ctk.CTk):
 
         self.log = ctk.CTkTextbox(
             panel,
-            height=62,
+            height=54,
             fg_color=COLORS["black"],
             border_width=1,
             border_color=COLORS["border"],
@@ -747,14 +747,14 @@ class LauncherApp(ctk.CTk):
         profiles = list(self.controller.profiles)
         mode = self.sort_mode.get()
 
-        if mode == "Tên Z → A":
+        if mode == "Z→A":
             return sorted(
                 profiles,
                 key=lambda item: item.profile_name.casefold(),
                 reverse=True,
             )
 
-        if mode == "Trạng thái":
+        if mode == "TT":
             return sorted(
                 profiles,
                 key=lambda item: (
