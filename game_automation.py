@@ -86,10 +86,15 @@ class AutomationWorker:
         wait=None,
         now=None,
         gameplay_ready=None,
+        on_log=None,
     ):
         self.gameplay_ready = (
             gameplay_ready
             or has_gameplay_socket
+        )
+        self.on_log = (
+            on_log
+            or (lambda _message: None)
         )
         self.context = context
         self.on_status = on_status or (lambda _state: None)
@@ -360,8 +365,7 @@ class AutomationWorker:
                 )
                 if self._halted():
                     break
-                self._state("ENTERING_BOSS")
-                self.enter(self.context.process_id, self.context.selected_boss)
+
                 if self._halted():
                     break
                 self._state("WAITING_BOSS_LOAD")
@@ -378,21 +382,92 @@ class AutomationWorker:
                         if self.wait(0.15, self.context.stop_event):
                             break
 
-                    text = self.boss_detector.read_hp(self.context)
-                    text = self.boss_detector.read_hp(self.context)
+                    text = self.boss_detector.read_hp(
+                        self.context
+                    )
+
                     if self._halted():
                         break
-                    if self.boss_detector.is_alive(text):
+
+                    debug = getattr(
+                        self.boss_detector,
+                        "last_debug",
+                        {},
+                    )
+
+                    ocr_alive = (
+                        self.boss_detector.is_alive(text)
+                    )
+
+                    visual_alive = debug.get(
+                        "visual_alive",
+                        False,
+                    )
+
+                    # Boss chỉ bị coi là không còn HP khi
+                    # cả OCR và kiểm tra hình ảnh đều fail.
+                    alive = (
+                        ocr_alive
+                        or visual_alive
+                    )
+
+                    if alive:
                         self.context.boss_dead_streak = 0
-                        self._state("BOSS_ALIVE")
+
                     else:
                         self.context.boss_dead_streak += 1
-                        if self.context.boss_dead_streak >= 2:
+
+                    debug = getattr(
+                        self.boss_detector,
+                        "last_debug",
+                        {},
+                    )
+
+                    attempts = "; ".join(
+                        f"{name}={value!r}"
+                        for name, value
+                        in debug.get("attempts", [])
+                    )
+
+                    self.on_log(
+                        (
+                            f"raw="
+                            f"{debug.get('raw_size')} "
+                            f"roi="
+                            f"{debug.get('roi')} "
+                            f"roi_shape="
+                            f"{debug.get('roi_shape')} "
+                            f"range="
+                            f"{debug.get('roi_min')}"
+                            f"..{debug.get('roi_max')} "
+                            f"mean="
+                            f"{debug.get('roi_mean')} "
+                            f"attempts=[{attempts}] "
+                            f"chosen="
+                            f"{debug.get('chosen')} "
+                            f"text={text!r} "
+                            f"alive={alive} "
+                            f"dead_streak="
+                            f"{self.context.boss_dead_streak} "
+                            f"debug="
+                            f"{debug.get('debug_dir')}"
+                        )
+                    )
+
+                    if alive:
+                        self._state("BOSS_ALIVE")
+
+                    else:
+                        if (
+                            self.context.boss_dead_streak
+                            >= 2
+                        ):
                             self._state("BOSS_DEAD")
                             break
-                        self._state("BOSS_CHECK_1_2_FAILED")
-                    if self.wait(BOSS_OCR_INTERVAL, self.context.stop_event):
-                        break
+
+                        self._state(
+                            "BOSS_CHECK_1_2_FAILED"
+                        )
                 if self._halted():
                     break
                 self._state("EXITING_BOSS")

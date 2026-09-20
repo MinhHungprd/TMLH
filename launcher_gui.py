@@ -143,7 +143,14 @@ class ProfileController:
                     pass
 
         return updated
-    def start_selected(self, profile_ids, choices=None, on_status=None, on_error=None):
+    def start_selected(
+        self,
+        profile_ids,
+        choices=None,
+        on_status=None,
+        on_error=None,
+        on_log=None,
+    ):
         started = []
         for profile_id in profile_ids:
             try:
@@ -178,14 +185,21 @@ class ProfileController:
                 context = ProfileRuntimeContext.from_profile(profile)
                 worker = self.worker_factory(
                     context,
+
                     on_status=(
                         lambda state, pid=profile_id:
                         on_status(pid, state)
                     ) if on_status else None,
+
                     on_error=(
                         lambda exc, pid=profile_id:
                         on_error(pid, exc)
                     ) if on_error else None,
+
+                    on_log=(
+                        lambda message, pid=profile_id:
+                        on_log(pid, message)
+                    ) if on_log else None,
                 )
 
                 self.workers[profile_id] = worker
@@ -480,13 +494,44 @@ class LauncherApp(tk.Tk):
                 self.controller.set_options(selected_row[0], self.boss.get(), self.size.get())
             self.controller.start_selected(
                 profile_ids,
-                on_status=lambda pid, state: self.after(0, self._worker_status, pid, state),
-                on_error=lambda pid, exc: self.after(0, self._worker_error, pid, exc),
+
+                on_status=lambda pid, state:
+                    self.after(
+                        0,
+                        self._worker_status,
+                        pid,
+                        state,
+                    ),
+
+                on_error=lambda pid, exc:
+                    self.after(
+                        0,
+                        self._worker_error,
+                        pid,
+                        exc,
+                    ),
+
+                on_log=lambda pid, message:
+                    self.after(
+                        0,
+                        self._worker_log,
+                        pid,
+                        message,
+                    ),
             )
             self._refresh()
         except (ValueError, OSError) as exc:
             messagebox.showerror("Start profiles", str(exc), parent=self)
-
+    def _worker_log(
+        self,
+        profile_id,
+        message,
+    ):
+        self._log(
+            profile_id,
+            "OCR",
+            message,
+        )
     def _worker_status(self, profile_id, state):
         self.statuses[profile_id] = state.replace("_", " ").title()
         self._log(profile_id, state)
