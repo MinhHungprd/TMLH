@@ -22,6 +22,12 @@ from profile_auth import save_profile_auth
 from profile_manager import MissingGameFilesError, ProfileManager
 from profile_models import ProfileRuntimeContext
 from profile_storage import ProfileStorage
+from proxy_manager import (
+    PROXY_SETTINGS_FILENAME,
+    ProxySettingsStorage,
+    apply_proxy_routing,
+)
+from proxy_ui import ProxySettingsDialog
 from ui_components import CompactCard, EditProfileDialog, ProfileRow, PROFILE_COLUMN_WIDTHS
 from ui_theme import APP_NAME, APP_VERSION, BOSS_KEYS, BOSS_LABELS, COLORS
 from window_layout import arrange_windows, stack_windows_for_boss
@@ -305,7 +311,11 @@ class LauncherApp(ctk.CTk):
         super().__init__()
 
         root = get_app_root()
+        self.app_root = root
         self.controller = controller or ProfileController(root)
+        self.proxy_settings_store = ProxySettingsStorage(
+            root / PROXY_SETTINGS_FILENAME
+        )
         settings = self.controller.settings_store.load()
 
         self.source = tk.StringVar(value=settings.game_source_path)
@@ -637,7 +647,7 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             actions,
             text="▶ Start",
-            width=78,
+            width=70,
             height=24,
             fg_color=COLORS["cyan"],
             hover_color=COLORS["blue"],
@@ -649,7 +659,7 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             actions,
             text="■ Stop",
-            width=70,
+            width=64,
             height=24,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["red_hover"],
@@ -661,7 +671,7 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             actions,
             text="▣ Xếp",
-            width=86,
+            width=74,
             height=24,
             fg_color=COLORS["purple"],
             hover_color=COLORS["purple_hover"],
@@ -672,13 +682,86 @@ class LauncherApp(ctk.CTk):
         ctk.CTkButton(
             actions,
             text="▤ Chồng",
-            width=86,
+            width=80,
             height=24,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
             font=ctk.CTkFont(size=9, weight="bold"),
             command=self._stack_windows,
         ).pack(side="left", padx=2)
+
+        ctk.CTkButton(
+            actions,
+            text="⇄ Proxy",
+            width=78,
+            height=24,
+            fg_color=COLORS["surface_soft"],
+            hover_color=COLORS["border_bright"],
+            font=ctk.CTkFont(size=9, weight="bold"),
+            command=self._open_proxy_dialog,
+        ).pack(side="left", padx=2)
+
+    def _open_proxy_dialog(self):
+        try:
+            settings = (
+                self.proxy_settings_store.load()
+            )
+        except RuntimeError as exc:
+            messagebox.showerror(
+                "Proxy",
+                str(exc),
+                parent=self,
+            )
+            return
+
+        ProxySettingsDialog(
+            self,
+            settings,
+            on_save=self._save_proxy_settings,
+            on_apply=self._apply_proxy_settings,
+        )
+
+    def _save_proxy_settings(self, settings):
+        self.proxy_settings_store.save(
+            settings
+        )
+        self._log(
+            "Proxy",
+            "READY",
+            (
+                f"Đã lưu {len(settings.proxies)} SOCKS5 proxy"
+            ),
+        )
+
+    def _apply_proxy_settings(self, settings):
+        if not settings.proxies:
+            raise ValueError(
+                "Chưa nhập SOCKS5 proxy"
+            )
+
+        self._log(
+            "Proxy",
+            "INFO",
+            (
+                "Đang tạo route: 1-30 Direct, "
+                "31+ qua SOCKS5 theo nhóm 30"
+            ),
+        )
+
+        executable = apply_proxy_routing(
+            self.app_root,
+            tuple(self.controller.profiles),
+            settings,
+        )
+
+        self._log(
+            "Proxy",
+            "SUCCESS",
+            (
+                f"Đã gửi cấu hình tới {executable.name}; "
+                "ProxiFyre cần restart để áp dụng"
+            ),
+        )
 
     def _build_log_panel(self):
         panel = CompactCard(self, height=96)
