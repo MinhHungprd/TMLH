@@ -1355,30 +1355,7 @@ class LauncherApp(ctk.CTk):
     # LOG / STATE
     # ------------------------------------------------------------------
 
-    def _flush_worker_logs(self):
-        drained = 0
-
-        while drained < 200:
-            try:
-                profile_id, message = (
-                    self._log_queue.get_nowait()
-                )
-            except queue.Empty:
-                break
-
-            self._worker_log(
-                profile_id,
-                message,
-            )
-            drained += 1
-
-        if self.winfo_exists():
-            self._log_flush_after_id = self.after(
-                100,
-                self._flush_worker_logs,
-            )
-
-    def _log(self, profile, state, message=""):
+    def _format_log_entry(self, profile, state, message=""):
         state_text = str(state).upper()
         line = f"[{datetime.now():%H:%M:%S}] [{state_text}]  {profile}"
         if message:
@@ -1393,17 +1370,32 @@ class LauncherApp(ctk.CTk):
         elif state_text in {"SUCCESS", "READY", "IN_GAME", "BOSS_ALIVE"}:
             tag = "success"
 
+        return line, tag
+
+    def _append_log_batch(self, entries):
+        if not entries:
+            return
+
         self.log.configure(state="normal")
-        try:
-            self.log._textbox.insert("end", line, tag)
-        except Exception:
-            self.log.insert("end", line)
 
-        self._log_line_count += 1
+        for line, tag in entries:
+            try:
+                self.log._textbox.insert(
+                    "end",
+                    line,
+                    tag,
+                )
+            except Exception:
+                self.log.insert(
+                    "end",
+                    line,
+                )
 
-        # Keep recent diagnostics while preventing an hours-long multi-profile
-        # run from growing the Tk Text widget without bound.
-        if self._log_line_count > 1000:
+        self._log_line_count += len(entries)
+
+        # Trim in chunks so long-running multi-profile sessions never make
+        # the Tk Text widget grow without bound.
+        while self._log_line_count > 1000:
             self.log.delete(
                 "1.0",
                 "201.0",
@@ -1412,6 +1404,44 @@ class LauncherApp(ctk.CTk):
 
         self.log.see("end")
         self.log.configure(state="disabled")
+
+    def _flush_worker_logs(self):
+        entries = []
+
+        while len(entries) < 200:
+            try:
+                profile_id, message = (
+                    self._log_queue.get_nowait()
+                )
+            except queue.Empty:
+                break
+
+            entries.append(
+                self._format_log_entry(
+                    profile_id,
+                    "INFO",
+                    message,
+                )
+            )
+
+        self._append_log_batch(entries)
+
+        if self.winfo_exists():
+            self._log_flush_after_id = self.after(
+                100,
+                self._flush_worker_logs,
+            )
+
+    def _log(self, profile, state, message=""):
+        self._append_log_batch(
+            [
+                self._format_log_entry(
+                    profile,
+                    state,
+                    message,
+                )
+            ]
+        )
 
     def _clear_log(self):
         self.log.configure(state="normal")
