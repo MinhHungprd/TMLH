@@ -22,8 +22,6 @@ import frida
 import psutil
 
 
-ROOT = Path(__file__).resolve().parent
-GAME_EXE = ROOT / "Game/ThienMenhLacHong_Launcher/Data/ThienMenhLacHong.exe"
 REMOTE = {"ip": "14.225.213.205", "port": 1002}
 
 ENTER_GROUP = 11
@@ -57,17 +55,6 @@ def parse_packet(hexstr: str):
     return plen, group, opcode, hexstr[24:]
 
 
-# ---------- Process ----------
-def find_game() -> psutil.Process:
-    matches = [p for p in psutil.process_iter(["name", "exe"])
-               if (p.info["name"] or "").lower() == GAME_EXE.name.lower()
-               and p.info["exe"]
-               and Path(p.info["exe"]).resolve() == GAME_EXE.resolve()]
-    if len(matches) != 1:
-        raise RuntimeError(f"Cần đúng 1 process game, tìm thấy {len(matches)}")
-    return matches[0]
-
-
 def has_game_socket(process: psutil.Process) -> bool:
     return any(c.raddr and c.status == psutil.CONN_ESTABLISHED
                and c.raddr.ip == REMOTE["ip"]
@@ -76,8 +63,10 @@ def has_game_socket(process: psutil.Process) -> bool:
 
 
 # ---------- Gửi ----------
-def send_packet(packet: str, wait: float) -> int:
-    process = find_game()
+def send_packet(pid: int, packet: str, wait: float, stop_event=None) -> int:
+    if stop_event is not None and stop_event.is_set():
+        raise RuntimeError("Boss command cancelled")
+    process = psutil.Process(pid)
     if not has_game_socket(process):
         raise RuntimeError("Game chưa kết nối tới server port 1002")
     source = Path(__file__).with_suffix(".js").read_text(encoding="utf-8").replace(
@@ -89,12 +78,27 @@ def send_packet(packet: str, wait: float) -> int:
         script.load()
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline and not script.exports_sync.ready():
-            time.sleep(0.1)
+            if stop_event is not None:
+                if stop_event.wait(0.1):
+                    raise RuntimeError("Boss command cancelled")
+            else:
+                time.sleep(0.1)
         if not script.exports_sync.ready():
             raise RuntimeError("Không thấy traffic game port 1002")
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError("Boss command cancelled")
         return script.exports_sync.enter(packet)
     finally:
         session.detach()
+
+
+def enter_boss(pid: int, boss_type: str, wait: float = 12, stop_event=None) -> int:
+    _, boss_id = resolve_boss(boss_type)
+    return send_packet(pid, enter_boss_hex(boss_id), wait, stop_event)
+
+
+def exit_boss(pid: int, wait: float = 12, stop_event=None) -> int:
+    return send_packet(pid, exit_boss_hex(), wait, stop_event)
 
 
 # ---------- Tiện ích ----------
@@ -136,39 +140,39 @@ def cmd_list() -> int:
     return 0
 
 
-def cmd_enter(target: str, wait: float) -> int:
+def cmd_enter(pid: int, target: str, wait: float) -> int:
     name, bid = resolve_boss(target)
     hexstr = enter_boss_hex(bid)
     print(f"[ENTER] {name} (0x{bid:04x}) hex={hexstr}")
-    sent = send_packet(hexstr, wait)
+    sent = send_packet(pid, hexstr, wait)
     print(f"  -> đã gửi {sent} byte")
     return 0
 
 
-def cmd_exit(wait: float) -> int:
+def cmd_exit(pid: int, wait: float) -> int:
     hexstr = exit_boss_hex()
     print(f"[EXIT] hex={hexstr}")
-    sent = send_packet(hexstr, wait)
+    sent = send_packet(pid, hexstr, wait)
     print(f"  -> đã gửi {sent} byte")
     return 0
 
 
-def cmd_both(target: str, wait: float, delay: float) -> int:
+def cmd_both(pid: int, target: str, wait: float, delay: float) -> int:
     name, bid = resolve_boss(target)
     print(f"[1/2] ENTER {name} (0x{bid:04x})")
-    cmd_enter(target, wait)
+    cmd_enter(pid, target, wait)
     print(f"  đợi {delay}s...")
     time.sleep(delay)
     print(f"[2/2] EXIT")
-    cmd_exit(wait)
+    cmd_exit(pid, wait)
     print("Xong. Kiểm tra game.")
     return 0
 
 
-def cmd_cycle(wait: float, delay: float) -> int:
+def cmd_cycle(pid: int, wait: float, delay: float) -> int:
     for i, (name, bid) in enumerate(BOSSES.items(), 1):
         print(f"\n=== [{i}/{len(BOSSES)}] {name} (0x{bid:04x}) ===")
-        cmd_both(name, wait, delay)
+        cmd_both(pid, name, wait, delay)
     print("\nĐã test xong tất cả boss.")
     return 0
 
@@ -186,6 +190,7 @@ def main() -> int:
     parser.add_argument("--send-hex", metavar="HEX")
     parser.add_argument("--delay", type=float, default=3.0)
     parser.add_argument("--wait", type=float, default=12)
+    parser.add_argument("--pid", type=int)
     args = parser.parse_args()
 
     if not 1 <= args.wait <= 60:
@@ -197,24 +202,27 @@ def main() -> int:
         if args.list:
             return cmd_list()
 
+        if args.pid is None and any((args.send_hex, args.cycle, args.both, args.enter, args.exit)):
+            parser.error("--pid is required for boss commands")
+
         if args.send_hex:
             plen, g, o, _ = parse_packet(args.send_hex)
             print(f"Gửi hex tùy ý: len={plen} group={g} opcode={o}")
-            sent = send_packet(args.send_hex, args.wait)
+            sent = send_packet(args.pid, args.send_hex, args.wait)
             print(f"Đã gửi {sent} byte.")
             return 0
 
         if args.cycle:
-            return cmd_cycle(args.wait, args.delay)
+            return cmd_cycle(args.pid, args.wait, args.delay)
 
         if args.both:
-            return cmd_both(args.both, args.wait, args.delay)
+            return cmd_both(args.pid, args.both, args.wait, args.delay)
 
         if args.enter:
-            return cmd_enter(args.enter, args.wait)
+            return cmd_enter(args.pid, args.enter, args.wait)
 
         if args.exit:
-            return cmd_exit(args.wait)
+            return cmd_exit(args.pid, args.wait)
 
         print("Dry-run. Dùng --list, --enter, --exit, --both, --cycle, --send-hex.")
         return cmd_list()

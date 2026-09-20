@@ -1,0 +1,7 @@
+﻿# SDD ledger — plan: docs/superpowers/plans/2026-09-20-multi-profile-boss-automation.md
+
+Pre-flight: workspace initialized manually because the bundled bash helper could not create its signal pipe on Windows.
+Task 1: complete (no commit; tests: python -m pytest tests/test_dependencies.py -q -> 1 passed; compile: python -m compileall tests -> passed)
+Continuation ruling: The prior Task 6-9 implementations contain concrete stubs (detector, OCR, worker, UI) and an incorrect launcher-to-game PID resolver. Completing the user-requested flow requires updating game_state.py, boss_detector.py, ocr_service.py, window_manager.py, window_layout.py, input_manager.py, profile_manager.py, game_automation.py, launcher_gui.py and their tests. vision.py stays unchanged unless a demonstrated defect requires it. No commits per user instruction.
+Continuation verification: 41 tests passed (`python -m pytest -p no:cacheprovider tests -q`), `python -m compileall .` passed, Tkinter startup smoke passed, and an in-memory OCR image read `12345` with installed Windows Tesseract. Real-game launch/manual login, Frida traffic, and multi-window behavior remain unverified without an interactive game session. No commits.
+Cleanup note: generated pytest/bytecode directories were enumerated within this workspace, but the recursive PowerShell removal command was rejected by tool policy. They remain; no alternative destructive command was attempted.

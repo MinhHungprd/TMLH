@@ -1,0 +1,8 @@
+pytest
+pytesseract
+opencv-python
+numpy
+Pillow
+psutil
+pywin32
+frida-tools

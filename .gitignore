@@ -1,0 +1,30 @@
+# Generated game profile clones
+Game/profiles/
+
+# Local profile/settings data
+profiles.json
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Logs/temp
+*.log
+*.tmp
+*.temp
+
+# Environment/secrets
+.env
+
+# IDE / OS
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

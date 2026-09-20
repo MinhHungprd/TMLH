@@ -1,282 +1,172 @@
-"""Non-blocking per-window login automation using client-relative assets."""
+"""Independent, interruptible automation for one game profile."""
 
-from dataclasses import dataclass
-import json
-import subprocess
 import threading
 import time
 from pathlib import Path
-import tkinter as tk
 
-import ctypes
-
-
-def _enable_dpi_awareness():
-    """Keep Win32 client coordinates and screenshot pixels in the same space."""
-    if hasattr(ctypes, "windll"):
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)
-        except (AttributeError, OSError):
-            try:
-                ctypes.windll.user32.SetProcessDPIAware()
-            except (AttributeError, OSError):
-                pass
-
-
-_enable_dpi_awareness()
-
-import win32api
-import win32con
 import win32gui
 import win32process
-from PIL import ImageGrab
 
-from asset_cropper import DEFAULT_GAME, is_game_process
+from automation_constants import (
+    BOSS_ENTER_WAIT, BOSS_OCR_INTERVAL, BOSS_RESPAWN_WAIT,
+    GAME_START_WAIT, IN_GAME_CONFIRM_SECONDS,
+)
+from boss.enter_boss import enter_boss, exit_boss
+from boss_detector import BossDetector
+from game_state import CLICK_CENTER, GameStateDetector
+from input_manager import InputManager
+from profile_manager import MissingGameFilesError
+from window_manager import acquire_profile_window, resize_client
 
 
-@dataclass
-class LoginPlan:
-    username: str
-    password: str
-    server: str = "Văn Lang"
-    step_sleep: float = 0.5
+def interruptible_wait(seconds, stop_event):
+    return stop_event.wait(seconds)
 
 
-class GameWorker:
-    """Owns one game process and can run independently from other workers."""
+class GameLifecycle:
+    def open(self, context):
+        if not (Path(context.game_path) / "ThienMenhLacHong_Launcher.exe").is_file():
+            raise MissingGameFilesError(context.game_path)
+        return acquire_profile_window(context.game_path, context.stop_event)
 
-    def __init__(self, plan: LoginPlan, assets_dir: str | Path = "assets", on_status=None):
-        self.plan = plan
-        self.assets_dir = Path(assets_dir)
-        self.on_status = on_status or (lambda _text: None)
-        self.process = None
-        self.hwnd = None
-        self.stop_event = threading.Event()
+    def resize(self, context):
+        resize_client(context.window_handle, context.window_width, context.window_height)
+
+    def valid(self, context):
+        if context.process_id is None or context.window_handle is None:
+            return False
+        if not win32gui.IsWindow(context.window_handle):
+            return False
+        return win32process.GetWindowThreadProcessId(context.window_handle)[1] == context.process_id
+
+
+class AutomationWorker:
+    def __init__(
+        self, context, on_status=None, on_error=None, *, lifecycle=None,
+        detector=None, boss_detector=None, input_manager=None,
+        enter=None, exit=None, wait=None, now=None,
+    ):
+        self.context = context
+        self.on_status = on_status or (lambda _state: None)
+        self.on_error = on_error or (lambda _exc: None)
+        self.lifecycle = lifecycle or GameLifecycle()
+        self.detector = detector or GameStateDetector()
+        self.boss_detector = boss_detector or BossDetector()
+        self.input_manager = input_manager or InputManager()
+        self.enter = enter or (lambda pid, boss: enter_boss(pid, boss, stop_event=context.stop_event))
+        self.exit = exit or (lambda pid: exit_boss(pid, stop_event=context.stop_event))
+        self.wait = wait or interruptible_wait
+        self.now = now or time.monotonic
+        self.thread = None
 
     def start(self):
-        threading.Thread(target=self.run, daemon=True).start()
+        if self.thread and self.thread.is_alive():
+            raise RuntimeError("Profile worker already running")
+        self.thread = threading.Thread(target=self.run, name=f"profile-{self.context.profile_id}", daemon=True)
+        self.thread.start()
 
     def stop(self):
-        self.stop_event.set()
+        self.context.stop_event.set()
+
+    def _state(self, name):
+        if self.context.state != name:
+            self.context.state = name
+            self.on_status(name)
+
+    def _halted(self):
+        return self.context.stop_event.is_set()
+
+    def _ensure_in_game(self):
+        absent_since = None
+        self._state("WAITING_GAME")
+        while not self._halted():
+            if not self.lifecycle.valid(self.context):
+                raise RuntimeError("Game window closed or changed owner")
+            checks = self.detector.check_signals(self.context)
+            if self._halted():
+                return False
+            if checks and any(check.detected for check in checks):
+                absent_since = None
+                self._state("WAITING_GAME")
+                for check in checks:
+                    if self._halted():
+                        return False
+                    if check.detected and check.action == CLICK_CENTER:
+                        self.input_manager.click_center(
+                            self.context.window_handle, check.coordinates, self.context.stop_event,
+                            self.context.process_id,
+                        )
+            else:
+                observed_at = self.now()
+                if absent_since is None:
+                    absent_since = observed_at
+                self._state("CONFIRMING_IN_GAME")
+                if observed_at - absent_since >= IN_GAME_CONFIRM_SECONDS:
+                    self._state("IN_GAME")
+                    return True
+            if self.wait(0.25, self.context.stop_event):
+                return False
+        return False
 
     def run(self):
         try:
-            self.status("Đang mở game")
-            self.process = subprocess.Popen([str(DEFAULT_GAME)])
-            self.hwnd = self._wait_for_window()
-            if not self.hwnd:
-                raise RuntimeError("Không tìm thấy cửa sổ game")
-            if self._login_flow():
-                self.status("Đã đăng nhập")
-            else:
-                self.status("Timeout: chưa xác nhận đăng nhập")
-        except Exception as exc:
-            self.status(f"Lỗi: {exc}")
-
-    def status(self, text):
-        self.on_status(text)
-
-    def _wait_for_window(self, timeout=30):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline and not self.stop_event.is_set():
-            found = self._find_window()
-            if found:
-                return found
-            time.sleep(0.25)
-        return None
-
-    def _find_window(self):
-        found = []
-        def callback(hwnd, _):
-            if not win32gui.IsWindowVisible(hwnd) or not win32gui.GetWindowText(hwnd):
+            if self._halted():
                 return
-            try:
-                _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                process = __import__("psutil").Process(pid)
-                # The launcher often replaces itself with a Unity child process.
-                if is_game_process(process.exe()) or (self.process and pid == self.process.pid):
-                    found.append(hwnd)
-            except Exception:
-                pass
-        win32gui.EnumWindows(callback, None)
-        return found[0] if found else None
-
-    def _ensure_window(self):
-        if self.hwnd and win32gui.IsWindow(self.hwnd):
-            return True
-        self.status("Cửa sổ chưa sẵn sàng, chờ game khởi động lại")
-        self.hwnd = self._wait_for_window(timeout=30)
-        return bool(self.hwnd)
-
-    def _sleep(self, seconds=None):
-        self.stop_event.wait(self.plan.step_sleep if seconds is None else seconds)
-
-    def _client_size(self):
-        if not self._ensure_window():
-            raise RuntimeError("Không còn cửa sổ game hợp lệ")
-        rect = win32gui.GetClientRect(self.hwnd)
-        return rect[2], rect[3]
-
-    def _screen_point(self, x, y):
-        if not self._ensure_window():
-            raise RuntimeError("Không còn cửa sổ game hợp lệ")
-        return win32gui.ClientToScreen(self.hwnd, (x, y))
-
-    def tap(self, x, y):
-        self.status(f"tap client ({x}, {y})")
-        sx, sy = self._screen_point(x, y)
-        self._send_input_click(sx, sy)
-        self._sleep()
-
-    def _send_input_click(self, screen_x, screen_y):
-        """Send a real OS-level synthetic click for Unity/Raw Input games."""
-        import ctypes
-        from ctypes import wintypes
-        user32 = ctypes.windll.user32
-        user32.SetForegroundWindow(self.hwnd)
-        time.sleep(0.08)
-        screen_width = user32.GetSystemMetrics(0)
-        screen_height = user32.GetSystemMetrics(1)
-
-        class MouseInput(ctypes.Structure):
-            _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG), ("mouseData", wintypes.DWORD),
-                        ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG))]
-        class Input(ctypes.Structure):
-            class U(ctypes.Union):
-                _fields_ = [("mi", MouseInput)]
-            _anonymous_ = ("u",)
-            _fields_ = [("type", wintypes.DWORD), ("u", U)]
-
-        absolute_x = round(screen_x * 65535 / max(1, screen_width - 1))
-        absolute_y = round(screen_y * 65535 / max(1, screen_height - 1))
-        extra = ctypes.pointer(wintypes.ULONG(0))
-        inputs = (Input * 3)(
-            Input(0, Input.U(mi=MouseInput(absolute_x, absolute_y, 0, 0x0001 | 0x8000, 0, extra))),
-            Input(0, Input.U(mi=MouseInput(0, 0, 0, 0x0002, 0, extra))),
-            Input(0, Input.U(mi=MouseInput(0, 0, 0, 0x0004, 0, extra))),
-        )
-        sent = user32.SendInput(3, ctypes.byref(inputs), ctypes.sizeof(Input))
-        self.status(f"SendInput screen ({screen_x}, {screen_y}) -> {sent}/3")
-        if sent != 3:
-            raise ctypes.WinError(ctypes.get_last_error())
-
-    def paste(self, text):
-        self.status(f"paste {len(text)} ký tự")
-        clipboard = tk.Tk()
-        clipboard.withdraw()
-        clipboard.clipboard_clear()
-        clipboard.clipboard_append(text)
-        clipboard.update()
-        win32gui.PostMessage(self.hwnd, win32con.WM_PASTE, 0, 0)
-        clipboard.destroy()
-        self._sleep()
-
-    def scan(self, asset_name, threshold=0.90):
-        self.status(f"scan {asset_name}")
-        path = self.assets_dir / asset_name
-        if not path.exists():
-            raise FileNotFoundError(f"Thiếu asset: {path}")
-        try:
-            import cv2
-            import numpy as np
-        except ImportError as exc:
-            raise RuntimeError("Cần cài opencv-python và numpy để scan asset") from exc
-        left, top = self._screen_point(0, 0)
-        width, height = self._client_size()
-        template = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-        if template is None:
-            raise RuntimeError(f"Không đọc được asset: {path}")
-        # Assets created by asset_cropper have a JSON sidecar containing the
-        # client-relative box. Match inside that exact box first; this avoids
-        # false negatives caused by searching the whole client area.
-        metadata_path = path.with_suffix(".json")
-        region_x, region_y = 0, 0
-        region_width, region_height = width, height
-        if metadata_path.exists():
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            box = metadata.get("box", {})
-            region_x = int(box.get("x", 0))
-            region_y = int(box.get("y", 0))
-            region_width = int(box.get("width", template.shape[1]))
-            region_height = int(box.get("height", template.shape[0]))
-            self.status(f"scan box client x={region_x}, y={region_y}, w={region_width}, h={region_height}")
-        region_width = min(region_width, width - region_x)
-        region_height = min(region_height, height - region_y)
-        if region_width < template.shape[1] or region_height < template.shape[0]:
-            return False, 0.0, (region_x, region_y)
-        screenshot = np.array(ImageGrab.grab(bbox=(left + region_x, top + region_y,
-                                                    left + region_x + region_width,
-                                                    top + region_y + region_height)))
-        self.status(f"capture live {screenshot.shape[1]}x{screenshot.shape[0]}")
-        screen = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
-        result = cv2.matchTemplate(screen, template, cv2.TM_CCOEFF_NORMED)
-        _, score, _, location = cv2.minMaxLoc(result)
-        matched = score >= threshold
-        self.status(f"scan {asset_name}: {'MATCH' if matched else 'MISS'} score={score:.3f}")
-        return matched, score, (location[0] + region_x, location[1] + region_y)
-
-    def _tap_asset_if_present(self, name):
-        present, _, _ = self.scan(name)
-        if present:
-            self.tap_asset(name)
-        return present
-
-    def wait_for_asset(self, name, timeout=60):
-        """Poll until an asset appears; polling interval follows the plan sleep."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline and not self.stop_event.is_set():
-            self._exception_pass()
-            matched, score, _ = self.scan(name)
-            if matched:
-                return True
-            self.status(f"Chờ {name} ({int(max(0, deadline - time.monotonic()))}s)")
-            self._sleep()
-        return False
-
-    def _exception_pass(self):
-        """Run the exceptional actions on every polling cycle."""
-        for asset in (
-            "asset__x329_y396_w56_h30.png",
-            "asset__x742_y437_w45_h24.png",
-        ):
-            try:
-                self.tap_asset(asset)
-            except FileNotFoundError:
-                continue
-
-    def tap_asset(self, name):
-        present, _, (x, y) = self.scan(name)
-        if not present:
-            return False
-        import cv2
-        image = cv2.imread(str(self.assets_dir / name), cv2.IMREAD_GRAYSCALE)
-        self.tap(x + image.shape[1] // 2, y + image.shape[0] // 2)
-        return True
-
-    def _login_flow(self):
-        outside = "asset__x795_y29_w29_h38.png"
-        intro = "asset__x742_y437_w45_h24.png"
-        start = "asset__x392_y389_w75_h35.png"
-        self.status("Đang scan màn hình")
-        if self.wait_for_asset(outside, timeout=30):
-            self.status("Bước 1/3: chọn server")
-            self.tap(429, 354)
-            self.tap(439, 200 if self.plan.server == "Văn Lang" else 245)
-
-            self.status("Bước 2/3: nhập tài khoản và mật khẩu")
-            if not self.wait_for_asset(outside, timeout=30):
-                return False
-            self.tap(444, 265)
-            self.tap(418, 186)
-            self.paste(self.plan.username)
-            self.tap(429, 238)
-            self.paste(self.plan.password)
-            self.tap(439, 307)
-        else:
-            self.status("Không thấy màn hình ngoài game; kiểm tra nút bắt đầu")
-
-        self.status("Bước 3/3: chờ nút bắt đầu")
-        if self.wait_for_asset(start, timeout=60):
-            self.tap_asset(start)
-            return True
-        return False
+            self._state("LAUNCHING_GAME")
+            pid, hwnd, launched = self.lifecycle.open(self.context)
+            self.context.process_id = pid
+            self.context.window_handle = hwnd
+            if self._halted():
+                return
+            self.lifecycle.resize(self.context)
+            if launched:
+                self._state("WAITING_STARTUP")
+                if self.wait(GAME_START_WAIT, self.context.stop_event):
+                    return
+            while not self._halted():
+                if not self._ensure_in_game():
+                    break
+                if self._halted():
+                    break
+                self._state("ENTERING_BOSS")
+                self.enter(self.context.process_id, self.context.selected_boss)
+                if self._halted():
+                    break
+                self._state("WAITING_BOSS_LOAD")
+                if self.wait(BOSS_ENTER_WAIT, self.context.stop_event):
+                    break
+                self.context.boss_dead_streak = 0
+                self._state("CHECKING_BOSS")
+                while not self._halted():
+                    if not self.lifecycle.valid(self.context):
+                        raise RuntimeError("Game window closed or changed owner")
+                    text = self.boss_detector.read_hp(self.context)
+                    if self._halted():
+                        break
+                    if self.boss_detector.is_alive(text):
+                        self.context.boss_dead_streak = 0
+                        self._state("BOSS_ALIVE")
+                    else:
+                        self.context.boss_dead_streak += 1
+                        if self.context.boss_dead_streak >= 2:
+                            self._state("BOSS_DEAD")
+                            break
+                        self._state("BOSS_CHECK_1_2_FAILED")
+                    if self.wait(BOSS_OCR_INTERVAL, self.context.stop_event):
+                        break
+                if self._halted():
+                    break
+                self._state("EXITING_BOSS")
+                self.exit(self.context.process_id)
+                if self._halted():
+                    break
+                self._state("WAITING_RESPAWN")
+                if self.wait(BOSS_RESPAWN_WAIT, self.context.stop_event):
+                    break
+        except Exception as exc:
+            if not self._halted():
+                self._state("ERROR")
+                self.on_error(exc)
+        finally:
+            if self.context.state != "ERROR":
+                self._state("STOPPED")
