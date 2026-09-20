@@ -26,6 +26,7 @@ from proxy_manager import (
     PROXY_SETTINGS_FILENAME,
     ProxySettingsStorage,
     apply_proxy_routing,
+    routing_config_matches,
 )
 from proxy_ui import ProxySettingsDialog
 from ui_components import CompactCard, EditProfileDialog, ProfileRow, PROFILE_COLUMN_WIDTHS
@@ -721,6 +722,21 @@ class LauncherApp(ctk.CTk):
             on_apply=self._apply_proxy_settings,
         )
 
+    def _ensure_proxy_routing_current(self):
+        settings = self.proxy_settings_store.load()
+
+        if not settings.proxies:
+            return
+
+        if not routing_config_matches(
+            tuple(self.controller.profiles),
+            settings,
+        ):
+            raise ValueError(
+                "Cấu hình proxy chưa được áp dụng cho danh sách profile hiện tại. "
+                "Mở Proxy và bấm 'Áp dụng' trước khi mở/start game."
+            )
+
     def _save_proxy_settings(self, settings):
         self.proxy_settings_store.save(
             settings
@@ -1205,6 +1221,24 @@ class LauncherApp(ctk.CTk):
                 if cancel.is_set():
                     return
 
+                try:
+                    self._ensure_proxy_routing_current()
+                except (ValueError, RuntimeError):
+                    self.after(
+                        0,
+                        self._status,
+                        profile.profile_id,
+                        "Proxy Apply Required",
+                    )
+                    self.after(
+                        0,
+                        self._log,
+                        profile.profile_id,
+                        "WARN",
+                        "Profile đã tạo. Hãy mở Proxy > Áp dụng rồi bấm Mở để đăng nhập.",
+                    )
+                    return
+
                 self.after(0, self._status, profile.profile_id, "Launching Game")
                 _pid, _hwnd, launched = acquire_profile_window(
                     profile.game_path,
@@ -1243,6 +1277,7 @@ class LauncherApp(ctk.CTk):
             profile = self.controller.get(profile_id)
             self.selected_profile_id = profile_id
             self.controller.manager.check_clone(profile)
+            self._ensure_proxy_routing_current()
             self._open_for_login(profile)
             self._refresh()
 
@@ -1326,6 +1361,8 @@ class LauncherApp(ctk.CTk):
         }
 
     def _start_profile_ids(self, profile_ids):
+        self._ensure_proxy_routing_current()
+
         self.controller.start_selected(
             profile_ids,
             **self._worker_callbacks(),
