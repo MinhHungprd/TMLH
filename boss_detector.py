@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from automation_constants import BOSS_HP
 from ocr_service import OcrService
@@ -50,6 +51,11 @@ class BossDetector:
         self.now = now or time.monotonic
         self._last_debug_at = None
         self.last_debug = {}
+
+        # Exact-frame OCR cache. If the canonical HP ROI is byte-identical
+        # to the previous scan, repeating Tesseract cannot change the input.
+        self._last_ocr_roi = None
+        self._last_ocr_text = None
 
     @staticmethod
     def count_visual_glyphs(roi) -> int:
@@ -336,6 +342,9 @@ class BossDetector:
         # Therefore OCR adds no decision value when the visual detector
         # has positively found the HP digits. Skip expensive Tesseract.
         if visual_alive:
+            self._last_ocr_roi = None
+            self._last_ocr_text = None
+
             self._set_debug(
                 raw_width=raw_width,
                 raw_height=raw_height,
@@ -349,6 +358,37 @@ class BossDetector:
                 debug_dir=None,
             )
             return ""
+
+        # If the exact same canonical ROI was already OCR'd, reuse the
+        # deterministic result. This is especially useful when a dead map or
+        # low-resolution HP stays visually unchanged for several scans.
+        if (
+            self._last_ocr_roi is not None
+            and self._last_ocr_text is not None
+            and np.array_equal(
+                roi,
+                self._last_ocr_roi,
+            )
+        ):
+            cached_text = self._last_ocr_text
+            cached_alive = self.is_alive(
+                cached_text
+            )
+
+            self._set_debug(
+                raw_width=raw_width,
+                raw_height=raw_height,
+                roi=roi,
+                chosen_name="cache",
+                chosen_text=cached_text,
+                alive=cached_alive,
+                attempts=[("cache", cached_text)],
+                visual_glyphs=visual_glyphs,
+                visual_alive=False,
+                debug_dir=None,
+            )
+
+            return cached_text
 
         x, y, w, h = BOSS_HP
 
@@ -413,6 +453,9 @@ class BossDetector:
         alive = self.is_alive(
             chosen_text
         )
+
+        self._last_ocr_roi = roi.copy()
+        self._last_ocr_text = chosen_text
 
         debug_dir = None
 
