@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -37,7 +38,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
         self.transient(master)
         self.grab_set()
 
-        self.path_var = ctk.StringVar(
+        self.path_var = tk.StringVar(
             value=settings.proxifyre_path
         )
 
