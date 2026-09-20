@@ -23,6 +23,8 @@ import psutil
 
 
 GAME_SERVER_IP = "14.225.213.205"
+GAMEPLAY_PORT = 1002
+LOGIN_PORT = 8001
 
 ENTER_GROUP = 11
 ENTER_OPCODE = 141          # 0x8d
@@ -57,59 +59,53 @@ def parse_packet(hexstr: str):
 
 def discover_game_remote(process: psutil.Process) -> dict:
     """
-    Tìm gameplay endpoint của đúng process/profile hiện tại.
+    Tìm socket gameplay của đúng PID/profile.
 
-    Không hard-code port vì các profile/session có thể dùng:
-    - 1001
-    - 1002
-    - 8001
-    - hoặc port khác
-
-    Chỉ xét TCP ESTABLISHED tới GAME_SERVER_IP.
+    8001 = login
+    1002 = ingame/gameplay
     """
 
-    endpoints = set()
+    connections = []
 
-    for connection in process.net_connections(kind="tcp"):
-        if not connection.raddr:
+    for conn in process.net_connections(kind="tcp"):
+        if not conn.raddr:
             continue
 
-        if connection.status != psutil.CONN_ESTABLISHED:
+        if conn.status != psutil.CONN_ESTABLISHED:
             continue
 
-        if connection.raddr.ip != GAME_SERVER_IP:
+        if conn.raddr.ip != GAME_SERVER_IP:
             continue
 
-        endpoints.add(
-            (
-                connection.raddr.ip,
-                connection.raddr.port,
-            )
+        connections.append(
+            (conn.raddr.ip, conn.raddr.port)
         )
 
-    if not endpoints:
-        raise RuntimeError(
-            f"PID {process.pid} không có kết nối TCP ESTABLISHED "
-            f"tới game server {GAME_SERVER_IP}"
-        )
+    # Socket gameplay có ưu tiên tuyệt đối.
+    for ip, port in connections:
+        if port == GAMEPLAY_PORT:
+            return {
+                "ip": ip,
+                "port": port,
+            }
 
-    if len(endpoints) > 1:
+    # Có server socket nhưng chưa thấy gameplay.
+    if connections:
         candidates = ", ".join(
             f"{ip}:{port}"
-            for ip, port in sorted(endpoints)
+            for ip, port in sorted(set(connections))
         )
 
         raise RuntimeError(
-            f"PID {process.pid} có nhiều game socket khả nghi: "
-            f"{candidates}. Không thể chọn an toàn."
+            f"PID {process.pid} chưa có socket ingame "
+            f"{GAME_SERVER_IP}:{GAMEPLAY_PORT}. "
+            f"Socket hiện tại: {candidates}"
         )
 
-    ip, port = next(iter(endpoints))
-
-    return {
-        "ip": ip,
-        "port": port,
-    }
+    raise RuntimeError(
+        f"PID {process.pid} chưa có kết nối tới "
+        f"game server {GAME_SERVER_IP}"
+    )
 
 
 # ---------- Gửi ----------
