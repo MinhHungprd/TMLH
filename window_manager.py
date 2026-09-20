@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import psutil
+import win32con
 import win32gui
 import win32process
 
@@ -50,7 +51,36 @@ def find_window_for_pid(pid: int):
     win32gui.EnumWindows(callback, None)
     return found[0] if found else None
 
+def set_window_topmost(hwnd: int, enabled: bool = True) -> None:
+    """
+    Đặt cửa sổ game thành Always On Top mà không giành focus.
 
+    enabled=True:
+        cửa sổ nằm trên các cửa sổ bình thường.
+
+    enabled=False:
+        trả lại z-order bình thường.
+    """
+    if not hwnd or not win32gui.IsWindow(hwnd):
+        raise ValueError(f"Invalid HWND: {hwnd}")
+
+    insert_after = (
+        win32con.HWND_TOPMOST
+        if enabled
+        else win32con.HWND_NOTOPMOST
+    )
+
+    win32gui.SetWindowPos(
+        hwnd,
+        insert_after,
+        0,
+        0,
+        0,
+        0,
+        win32con.SWP_NOMOVE
+        | win32con.SWP_NOSIZE
+        | win32con.SWP_NOACTIVATE,
+    )
 def acquire_profile_window(game_path, stop_event, timeout=30):
     """Find a process inside this clone or launch it, then bind its own HWND."""
     clone = Path(game_path).resolve()
@@ -92,6 +122,17 @@ def acquire_profile_window(game_path, stop_event, timeout=30):
 def resize_client(hwnd: int, width: int, height: int) -> None:
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
     client = win32gui.GetClientRect(hwnd)
+
     outer_width = right - left + width - client[2]
     outer_height = bottom - top + height - client[3]
-    win32gui.SetWindowPos(hwnd, 0, left, top, outer_width, outer_height, 0x0004)
+
+    win32gui.SetWindowPos(
+        hwnd,
+        0,
+        left,
+        top,
+        outer_width,
+        outer_height,
+        win32con.SWP_NOZORDER
+        | win32con.SWP_NOACTIVATE,
+    )

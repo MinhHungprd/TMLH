@@ -15,7 +15,10 @@ from profile_manager import MissingGameFilesError, ProfileManager
 from profile_models import ProfileRuntimeContext
 from profile_storage import ProfileStorage
 from window_layout import arrange_windows
-from window_manager import acquire_profile_window
+from window_manager import (
+    acquire_profile_window,
+    set_window_topmost,
+)
 
 
 SIZES = tuple(f"{w}x{h}" for w, h in RESOLUTIONS)
@@ -242,6 +245,7 @@ class LauncherApp(tk.Tk):
                     return
                 self.after(0, self._status, profile.profile_id, "Launching Game")
                 _pid, _hwnd, launched = acquire_profile_window(profile.game_path, cancel)
+                set_window_topmost(_hwnd, True)
                 if cancel.is_set():
                     return
                 if launched:
@@ -273,6 +277,7 @@ class LauncherApp(tk.Tk):
             try:
                 self.after(0, self._status, profile.profile_id, "Launching Game")
                 _pid, _hwnd, launched = acquire_profile_window(profile.game_path, cancel)
+                set_window_topmost(_hwnd, True)
                 if launched:
                     self.after(0, self._status, profile.profile_id, "Waiting Startup")
                     if cancel.wait(10):
@@ -325,7 +330,11 @@ class LauncherApp(tk.Tk):
         self.statuses[profile_id] = state.replace("_", " ").title()
         self._log(profile_id, state)
         self._refresh()
-        if state in ("WAITING_STARTUP", "WAITING_GAME"):
+        if state in (
+            "WAITING_STARTUP",
+            "WAITING_GAME",
+            "CONFIRMING_IN_GAME",
+        ):
             self._arrange_windows()
 
     def _worker_error(self, profile_id, exc):
@@ -339,27 +348,95 @@ class LauncherApp(tk.Tk):
         import win32gui
 
         items = []
+
         for worker in self.controller.workers.values():
-            hwnd = worker.context.window_handle
-            if hwnd and win32gui.IsWindow(hwnd):
-                left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-                items.append((hwnd, right - left, bottom - top))
+            context = worker.context
+            hwnd = context.window_handle
+
+            if not hwnd:
+                continue
+
+            if not win32gui.IsWindow(hwnd):
+                continue
+
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+
+            items.append(
+                (
+                    hwnd,
+                    right - left,
+                    bottom - top,
+                )
+            )
+
         if not items:
             return
-        monitor = win32api.MonitorFromWindow(items[0][0], win32con.MONITOR_DEFAULTTONEAREST)
-        left, top, right, bottom = win32api.GetMonitorInfo(monitor)["Work"]
-        placements = arrange_windows(items, (left, top, right - left, bottom - top))
+
+        monitor = win32api.MonitorFromWindow(
+            items[0][0],
+            win32con.MONITOR_DEFAULTTONEAREST,
+        )
+
+        left, top, right, bottom = (
+            win32api.GetMonitorInfo(monitor)["Work"]
+        )
+
+        placements = arrange_windows(
+            items,
+            (
+                left,
+                top,
+                right - left,
+                bottom - top,
+            ),
+        )
+
         for place in placements:
-            win32gui.SetWindowPos(place.hwnd, 0, place.x, place.y, 0, 0,
-                                  win32con.SWP_NOSIZE | win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
-        if any(p.overlap or p.y + p.height > bottom or p.x + p.width > right for p in placements):
-            self._log("App", "Layout", "Warning: windows do not all fit in the working area")
+            if not win32gui.IsWindow(place.hwnd):
+                continue
+
+            win32gui.SetWindowPos(
+                place.hwnd,
+                win32con.HWND_TOPMOST,
+                place.x,
+                place.y,
+                0,
+                0,
+                win32con.SWP_NOSIZE
+                | win32con.SWP_NOACTIVATE,
+            )
+
+        if any(
+            place.overlap
+            or place.y + place.height > bottom
+            or place.x + place.width > right
+            for place in placements
+        ):
+            self._log(
+                "App",
+                "Layout",
+                "Warning: windows do not all fit in the working area",
+            )
 
     def _stop_selected(self):
         self.controller.stop_selected(tuple(self.checked))
+
         for profile_id in self.checked:
-            if profile_id in self.controller.workers:
-                self.statuses[profile_id] = "Stopping"
+            worker = self.controller.workers.get(profile_id)
+
+            if worker is None:
+                continue
+
+            hwnd = worker.context.window_handle
+
+            if hwnd:
+                try:
+                    set_window_topmost(hwnd, False)
+                except (ValueError, OSError):
+                    pass
+
+            self.statuses[profile_id] = "Stopping"
+
         self._refresh()
 
     def _repair(self):
@@ -387,7 +464,20 @@ class LauncherApp(tk.Tk):
     def _close(self):
         for event in self.creation_events.values():
             event.set()
-        self.controller.stop_selected(tuple(self.controller.workers))
+
+        self.controller.stop_selected(
+            tuple(self.controller.workers)
+        )
+
+        for worker in self.controller.workers.values():
+            hwnd = worker.context.window_handle
+
+            if hwnd:
+                try:
+                    set_window_topmost(hwnd, False)
+                except (ValueError, OSError):
+                    pass
+
         self.destroy()
 
 
