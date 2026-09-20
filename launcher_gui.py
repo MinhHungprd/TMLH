@@ -123,21 +123,46 @@ class ProfileController:
         for profile_id in profile_ids:
             try:
                 profile = self.get(profile_id)
+                old_worker = self.workers.get(profile_id)
+
+                if old_worker is not None:
+                    old_thread = getattr(old_worker, "thread", None)
+
+                    if old_thread is not None and old_thread.is_alive():
+                        # Nếu vừa Stop rồi Start lại quá nhanh,
+                        # chờ worker cũ thoát hoàn toàn trước.
+                        if old_worker.context.stop_event.is_set():
+                            old_thread.join(timeout=3.0)
+
+                        # Sau 3 giây vẫn chưa chết thì tuyệt đối
+                        # không tạo worker thứ hai trên cùng profile.
+                        if old_thread.is_alive():
+                            raise RuntimeError(
+                                f"{profile.profile_name}: "
+                                f"worker cũ vẫn đang dừng, "
+                                f"không thể Start worker mới"
+                            )
+
+                    # Worker cũ đã hoàn toàn kết thúc.
+                    self.workers.pop(profile_id, None)
                 if choices and profile_id in choices:
                     profile = self.set_options(profile_id, *choices[profile_id])
                 if not profile.login_ready:
                     raise ValueError(f"{profile.profile_name}: login confirmation required")
                 self.manager.check_clone(profile)
-                if (profile_id in self.workers
-                        and not self.workers[profile_id].context.stop_event.is_set()
-                        and self.workers[profile_id].context.state not in ("ERROR", "STOPPED")):
-                    continue
                 context = ProfileRuntimeContext.from_profile(profile)
                 worker = self.worker_factory(
                     context,
-                    on_status=(lambda state, pid=profile_id: on_status(pid, state)) if on_status else None,
-                    on_error=(lambda exc, pid=profile_id: on_error(pid, exc)) if on_error else None,
+                    on_status=(
+                        lambda state, pid=profile_id:
+                        on_status(pid, state)
+                    ) if on_status else None,
+                    on_error=(
+                        lambda exc, pid=profile_id:
+                        on_error(pid, exc)
+                    ) if on_error else None,
                 )
+
                 self.workers[profile_id] = worker
                 worker.start()
                 started.append(profile_id)

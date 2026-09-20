@@ -76,7 +76,25 @@ class AutomationWorker:
 
     def stop(self):
         self.context.stop_event.set()
+    def wait_stopped(self, timeout=3.0) -> bool:
+        thread = self.thread
 
+        if thread is None:
+            return True
+
+        if thread is threading.current_thread():
+            return False
+
+        thread.join(timeout)
+
+        return not thread.is_alive()
+
+
+    def is_running(self) -> bool:
+        return (
+            self.thread is not None
+            and self.thread.is_alive()
+        )
     def _state(self, name):
         if self.context.state != name:
             self.context.state = name
