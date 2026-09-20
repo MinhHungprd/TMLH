@@ -165,6 +165,10 @@ class ProfileRow(ctk.CTkFrame):
 
         self.bind("<Button-1>", lambda _event: on_focus(profile.profile_id))
 
+    def set_status(self, status: str):
+        """Update only this row's status badge without rebuilding the list."""
+        self.status_badge.set_status(status)
+
     @staticmethod
     def _button(master, text, color, command):
         return ctk.CTkButton(
