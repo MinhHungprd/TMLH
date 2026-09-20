@@ -161,3 +161,29 @@ def resize_client(hwnd: int, width: int, height: int) -> tuple[int, int]:
 
     # Quan trọng: đọc lại kích thước client THỰC TẾ sau resize.
     return get_client_size(hwnd)
+
+def ensure_client_size(
+    hwnd: int,
+    width: int,
+    height: int,
+    tolerance: int = 1,
+) -> bool:
+    """
+    Đảm bảo client area luôn đúng resolution mong muốn.
+
+    Returns:
+        True  -> vừa phải resize
+        False -> kích thước đã đúng
+    """
+    actual_width, actual_height = get_client_size(hwnd)
+
+    if (
+        abs(actual_width - width) <= tolerance
+        and abs(actual_height - height) <= tolerance
+    ):
+        return False
+
+    resize_client(hwnd, width, height)
+    set_window_topmost(hwnd, True)
+
+    return True

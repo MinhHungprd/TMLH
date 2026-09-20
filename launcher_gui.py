@@ -15,10 +15,7 @@ from profile_manager import MissingGameFilesError, ProfileManager
 from profile_models import ProfileRuntimeContext
 from profile_storage import ProfileStorage
 from window_layout import arrange_windows
-from window_manager import (
-    acquire_profile_window,
-    set_window_topmost,
-)
+
 from window_manager import (
     acquire_profile_window,
     resize_client,
@@ -105,15 +102,15 @@ class ProfileController:
                 and context.state not in ("STOPPED", "ERROR")
             ):
                 try:
-                    actual_width, actual_height = resize_client(
+                    resize_client(
                         hwnd,
                         width,
                         height,
                     )
 
-                    # Runtime luôn phản ánh kích thước THỰC của client.
-                    context.window_width = actual_width
-                    context.window_height = actual_height
+                    # Đây luôn là resolution mong muốn.
+                    context.window_width = width
+                    context.window_height = height
 
                     set_window_topmost(hwnd, True)
 

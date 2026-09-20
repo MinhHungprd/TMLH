@@ -18,7 +18,11 @@ from input_manager import InputManager
 from profile_manager import MissingGameFilesError
 from window_manager import acquire_profile_window, resize_client
 
-
+from window_manager import (
+    acquire_profile_window,
+    ensure_client_size,
+    resize_client,
+)
 def interruptible_wait(seconds, stop_event):
     return stop_event.wait(seconds)
 
@@ -38,7 +42,12 @@ class GameLifecycle:
         if not win32gui.IsWindow(context.window_handle):
             return False
         return win32process.GetWindowThreadProcessId(context.window_handle)[1] == context.process_id
-
+    def ensure_size(self, context):
+        return ensure_client_size(
+            context.window_handle,
+            context.window_width,
+            context.window_height,
+        )
 
 class AutomationWorker:
     def __init__(
@@ -81,7 +90,18 @@ class AutomationWorker:
         self._state("WAITING_GAME")
         while not self._halted():
             if not self.lifecycle.valid(self.context):
-                raise RuntimeError("Game window closed or changed owner")
+                raise RuntimeError(
+                    "Game window closed or changed owner"
+                )
+
+            # Unity có thể tự reset resolution khi đổi scene.
+            resized = self.lifecycle.ensure_size(self.context)
+
+            if resized:
+                # Cho Unity render lại frame sau resize.
+                if self.wait(0.15, self.context.stop_event):
+                    return False
+
             checks = self.detector.check_signals(self.context)
             if self._halted():
                 return False
@@ -140,6 +160,13 @@ class AutomationWorker:
                 while not self._halted():
                     if not self.lifecycle.valid(self.context):
                         raise RuntimeError("Game window closed or changed owner")
+                    resized = self.lifecycle.ensure_size(self.context)
+
+                    if resized:
+                        if self.wait(0.15, self.context.stop_event):
+                            break
+
+                    text = self.boss_detector.read_hp(self.context)
                     text = self.boss_detector.read_hp(self.context)
                     if self._halted():
                         break

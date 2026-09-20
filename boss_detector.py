@@ -4,7 +4,10 @@ import cv2
 
 from automation_constants import BOSS_HP
 from ocr_service import OcrService
-from vision import capture_client, scale_roi
+from vision import (
+    capture_client,
+    normalize_to_base,
+)
 
 
 class BossDetector:
@@ -25,13 +28,36 @@ class BossDetector:
         return self.dead_streak >= 2
 
     def read_hp(self, context) -> str:
-        image = self.capture(context.window_handle)
-        height, width = image.shape[:2]
-        x, y, w, h = scale_roi(BOSS_HP, width, height)
-        roi = image[y:y + h, x:x + w]
+        image = self.capture(
+            context.window_handle
+        )
+
+        # Toàn bộ vision về canonical 860x484.
+        image = normalize_to_base(image)
+
+        x, y, w, h = BOSS_HP
+
+        roi = image[
+            y:y + h,
+            x:x + w
+        ]
+
         if roi.size == 0:
-            raise RuntimeError("Boss HP ROI is outside game client area")
-        roi = cv2.resize(roi, (max(w, BOSS_HP[2]), max(h, BOSS_HP[3])), interpolation=cv2.INTER_CUBIC)
+            raise RuntimeError(
+                "Boss HP ROI is outside game client area"
+            )
+
+        # Phóng lớn thêm cho OCR.
+        roi = cv2.resize(
+            roi,
+            (
+                w * 3,
+                h * 3,
+            ),
+            interpolation=cv2.INTER_CUBIC,
+        )
+
         if self.ocr is None:
             self.ocr = OcrService()
+
         return self.ocr.read(roi)

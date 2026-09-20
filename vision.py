@@ -50,3 +50,66 @@ def capture_client(hwnd: int) -> np.ndarray:
     rect = win32gui.GetClientRect(hwnd)
     image = ImageGrab.grab((left, top, left + rect[2], top + rect[3]))
     return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
+def normalize_to_base(image: np.ndarray) -> np.ndarray:
+    """
+    Đưa mọi screenshot về canonical 860x484.
+
+    Vision từ đây trở đi luôn chạy trên hệ tọa độ gốc.
+    """
+    height, width = image.shape[:2]
+
+    if width == BASE_WIDTH and height == BASE_HEIGHT:
+        return image
+
+    if width < BASE_WIDTH or height < BASE_HEIGHT:
+        interpolation = cv2.INTER_CUBIC
+    else:
+        interpolation = cv2.INTER_AREA
+
+    return cv2.resize(
+        image,
+        (BASE_WIDTH, BASE_HEIGHT),
+        interpolation=interpolation,
+    )
+
+
+def base_point_to_client(
+    point: tuple[int, int],
+    client_width: int,
+    client_height: int,
+) -> tuple[int, int]:
+    x, y = point
+
+    return (
+        round(x * client_width / BASE_WIDTH),
+        round(y * client_height / BASE_HEIGHT),
+    )
+
+
+def expand_roi(
+    roi,
+    padding: int = 6,
+    image_width: int = BASE_WIDTH,
+    image_height: int = BASE_HEIGHT,
+):
+    x, y, w, h = roi
+
+    left = max(0, x - padding)
+    top = max(0, y - padding)
+
+    right = min(
+        image_width,
+        x + w + padding,
+    )
+
+    bottom = min(
+        image_height,
+        y + h + padding,
+    )
+
+    return (
+        left,
+        top,
+        right - left,
+        bottom - top,
+    )

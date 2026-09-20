@@ -2,9 +2,22 @@ from dataclasses import dataclass
 
 import cv2
 
-from automation_constants import SIGNAL_1, SIGNAL_2, SIGNAL_3
-from vision import ScaledAssetCache, capture_client, scale_roi
+from automation_constants import (
+    BASE_HEIGHT,
+    BASE_WIDTH,
+    SIGNAL_1,
+    SIGNAL_2,
+    SIGNAL_3,
+)
 
+from vision import (
+    ScaledAssetCache,
+    base_point_to_client,
+    capture_client,
+    expand_roi,
+    normalize_to_base,
+    roi_center,
+)
 
 CLICK_CENTER = "CLICK_CENTER"
 
@@ -38,35 +51,155 @@ class GameStateDetector:
         x, y, w, h = roi
         return SignalCheck(True, CLICK_CENTER, (x + w // 2, y + h // 2))
 
-    def _match(self, image, asset_name, roi):
-        height, width = image.shape[:2]
-        x, y, w, h = roi
-        template = self.assets.get(asset_name, width, height)
-        region = image[y:y + h, x:x + w]
-        if region.shape[0] < template.shape[0] or region.shape[1] < template.shape[1]:
+    def _match(
+        self,
+        image,
+        asset_name,
+        roi,
+    ):
+        # image ở đây luôn là canonical 860x484.
+        template = self.assets.get(
+            asset_name,
+            BASE_WIDTH,
+            BASE_HEIGHT,
+        )
+
+        # Không match đúng khít ROI.
+        # Cho phép Unity lệch vài pixel sau scale/render.
+        search_roi = expand_roi(
+            roi,
+            padding=6,
+            image_width=BASE_WIDTH,
+            image_height=BASE_HEIGHT,
+        )
+
+        x, y, w, h = search_roi
+
+        region = image[
+            y:y + h,
+            x:x + w
+        ]
+
+        if (
+            region.shape[0] < template.shape[0]
+            or region.shape[1] < template.shape[1]
+        ):
             return False
-        score = cv2.matchTemplate(region, template, cv2.TM_CCOEFF_NORMED).max()
-        return score >= 0.90
+
+        result = cv2.matchTemplate(
+            region,
+            template,
+            cv2.TM_CCOEFF_NORMED,
+        )
+
+        score = float(result.max())
+
+        return score >= 0.82
 
     def check_signals(self, context):
-        image = (
-            None
-            if self.matcher is not None
-            else self.capture(context.window_handle)
+        if self.matcher is not None:
+            client_width = context.window_width
+            client_height = context.window_height
+
+            results = []
+
+            for name, asset, roi in self.SIGNALS:
+                detected = bool(
+                    self.matcher(
+                        name,
+                        roi,
+                    )
+                )
+
+                if not detected:
+                    results.append(
+                        SignalCheck(
+                            False,
+                            None,
+                        )
+                    )
+                    continue
+
+                if name == "s1":
+                    results.append(
+                        SignalCheck(
+                            True,
+                            None,
+                        )
+                    )
+                    continue
+
+                click = base_point_to_client(
+                    roi_center(roi),
+                    client_width,
+                    client_height,
+                )
+
+                results.append(
+                    SignalCheck(
+                        True,
+                        CLICK_CENTER,
+                        click,
+                    )
+                )
+
+            return results
+
+        # Screenshot ở resolution THỰC TẾ.
+        raw = self.capture(
+            context.window_handle
         )
 
-        width, height = (
-            (context.window_width, context.window_height)
-            if image is None
-            else (image.shape[1], image.shape[0])
+        actual_height, actual_width = (
+            raw.shape[:2]
         )
 
-        return [
-            self.inspect(
-                name,
-                scale_roi(roi, width, height),
+        # Vision luôn chạy tại 860x484.
+        image = normalize_to_base(raw)
+
+        results = []
+
+        for name, asset, roi in self.SIGNALS:
+            detected = self._match(
                 image,
                 asset,
+                roi,
             )
-            for name, asset, roi in self.SIGNALS
-        ]
+
+            if not detected:
+                results.append(
+                    SignalCheck(
+                        False,
+                        None,
+                    )
+                )
+                continue
+
+            if name == "s1":
+                results.append(
+                    SignalCheck(
+                        True,
+                        None,
+                    )
+                )
+                continue
+
+            # ROI đang là hệ 860x484.
+            base_center = roi_center(roi)
+
+            # Click phải chuyển trở lại client hiện tại.
+            click = base_point_to_client(
+                base_center,
+                actual_width,
+                actual_height,
+            )
+
+            results.append(
+                SignalCheck(
+                    True,
+                    CLICK_CENTER,
+                    click,
+                )
+            )
+
+        return results
