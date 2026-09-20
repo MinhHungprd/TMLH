@@ -9,6 +9,10 @@ import customtkinter as ctk
 from ui_theme import BOSS_LABELS, COLORS, status_palette
 
 
+# Shared by the list header and every profile row so columns never drift.
+PROFILE_COLUMN_WIDTHS = (22, 108, 96, 88, 92)
+
+
 class CompactCard(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
         super().__init__(
@@ -31,8 +35,8 @@ class StatusBadge(ctk.CTkLabel):
             fg_color=bg,
             corner_radius=8,
             font=ctk.CTkFont(size=7, weight="bold"),
-            height=18,
-            width=52,
+            height=17,
+            width=76,
             **kwargs,
         )
 
@@ -74,10 +78,8 @@ class ProfileRow(ctk.CTkFrame):
         self.profile_id = profile.profile_id
         self.on_change = on_change
 
-        # Balanced columns for the 480 px dashboard.
-        widths = (22, 82, 54, 84, 70, 92)
-        for index, width in enumerate(widths):
-            self.grid_columnconfigure(index, minsize=width, weight=1 if index == 1 else 0)
+        for index, width in enumerate(PROFILE_COLUMN_WIDTHS):
+            self.grid_columnconfigure(index, minsize=width, weight=0)
 
         self.check_var = tk.BooleanVar(value=checked)
         ctk.CTkCheckBox(
@@ -94,29 +96,31 @@ class ProfileRow(ctk.CTkFrame):
             border_color=COLORS["border_bright"],
         ).grid(row=0, column=0, padx=(4, 1), pady=8)
 
+        profile_cell = ctk.CTkFrame(self, fg_color="transparent")
+        profile_cell.grid(row=0, column=1, sticky="w", padx=(3, 2), pady=3)
+
         name = ctk.CTkLabel(
-            self,
+            profile_cell,
             text=profile.profile_name,
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=9, weight="bold"),
             anchor="w",
+            height=16,
         )
-        name.grid(row=0, column=1, sticky="ew", padx=2)
-        name.bind("<Button-1>", lambda _event: on_focus(profile.profile_id))
+        name.pack(anchor="w")
 
-        StatusBadge(self, runtime_status).grid(
-            row=0,
-            column=2,
-            padx=1,
-            pady=8,
-            sticky="w",
-        )
+        status = StatusBadge(profile_cell, runtime_status)
+        status.configure(anchor="w")
+        status.pack(anchor="w", pady=(1, 0))
+
+        name.bind("<Button-1>", lambda _event: on_focus(profile.profile_id))
+        status.bind("<Button-1>", lambda _event: on_focus(profile.profile_id))
 
         boss_label = BOSS_LABELS.get(profile.selected_boss, profile.selected_boss)
         self.boss_combo = ctk.CTkComboBox(
             self,
             values=list(boss_values),
-            width=80,
+            width=92,
             height=24,
             font=ctk.CTkFont(size=8),
             dropdown_font=ctk.CTkFont(size=8),
@@ -130,12 +134,12 @@ class ProfileRow(ctk.CTkFrame):
             command=lambda _value: self._changed(),
         )
         self.boss_combo.set(boss_label)
-        self.boss_combo.grid(row=0, column=3, padx=2)
+        self.boss_combo.grid(row=0, column=2, padx=2)
 
         self.size_combo = ctk.CTkComboBox(
             self,
             values=list(size_values),
-            width=66,
+            width=84,
             height=24,
             font=ctk.CTkFont(size=8),
             dropdown_font=ctk.CTkFont(size=8),
@@ -149,10 +153,10 @@ class ProfileRow(ctk.CTkFrame):
             command=lambda _value: self._changed(),
         )
         self.size_combo.set(f"{profile.window_width}x{profile.window_height}")
-        self.size_combo.grid(row=0, column=4, padx=2)
+        self.size_combo.grid(row=0, column=3, padx=2)
 
         actions = ctk.CTkFrame(self, fg_color="transparent")
-        actions.grid(row=0, column=5, padx=(1, 3), sticky="e")
+        actions.grid(row=0, column=4, padx=(1, 3), sticky="e")
 
         self._button(actions, "▶", COLORS["blue"], lambda: on_start(profile.profile_id)).pack(side="left", padx=1)
         self._button(actions, "■", COLORS["red"], lambda: on_stop(profile.profile_id)).pack(side="left", padx=1)
@@ -166,7 +170,7 @@ class ProfileRow(ctk.CTkFrame):
         return ctk.CTkButton(
             master,
             text=text,
-            width=20,
+            width=19,
             height=22,
             corner_radius=7,
             fg_color=color,
