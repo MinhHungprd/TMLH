@@ -783,15 +783,10 @@ class LauncherApp(ctk.CTk):
             if not query or query in profile.profile_name.casefold()
         ]
 
-        self.profiles_card.body.master.master  # keep card alive for frozen builds
-        try:
-            header = self.profiles_card.winfo_children()[0]
-            # subtitle lives in header child 1 when present
-            labels = header.winfo_children()
-            if len(labels) > 1:
-                labels[1].configure(text=f"{len(self.controller.profiles)} profile")
-        except Exception:
-            pass
+        if self.profiles_card.subtitle_label is not None:
+            self.profiles_card.subtitle_label.configure(
+                text=f"{len(self.controller.profiles)} profile"
+            )
 
         boss_values = tuple(BOSS_LABELS.get(key, key) for key in BOSSES)
 
