@@ -193,6 +193,11 @@ class AutomationWorker:
 
         self.thread = None
 
+        # Diagnostic OCR logs are useful, but logging every alive scan from
+        # many profiles wastes GUI/queue work. Dead-candidate scans still log
+        # every cycle; stable alive scans are sampled every 3 seconds.
+        self._last_alive_debug_log_at = float("-inf")
+
     def start(self):
         if (
             self.thread
@@ -743,22 +748,35 @@ class AutomationWorker:
                         )
                     )
 
-                    self.on_log(
-                        (
-                            f"text={text!r} "
-                            f"digits={digits!r} "
-                            f"ocr_alive={ocr_alive} "
-                            f"visual_glyphs="
-                            f"{debug.get('visual_glyphs')} "
-                            f"visual_alive={visual_alive} "
-                            f"final_alive={alive} "
-                            f"dead_streak="
-                            f"{self.context.boss_dead_streak} "
-                            f"dead_for="
-                            f"{dead_for:.1f}s/"
-                            f"{BOSS_DEAD_CONFIRM_SECONDS:.1f}s"
+                    should_log_debug = (
+                        not alive
+                        or (
+                            now
+                            - self._last_alive_debug_log_at
+                            >= 3.0
                         )
                     )
+
+                    if should_log_debug:
+                        self.on_log(
+                            (
+                                f"text={text!r} "
+                                f"digits={digits!r} "
+                                f"ocr_alive={ocr_alive} "
+                                f"visual_glyphs="
+                                f"{debug.get('visual_glyphs')} "
+                                f"visual_alive={visual_alive} "
+                                f"final_alive={alive} "
+                                f"dead_streak="
+                                f"{self.context.boss_dead_streak} "
+                                f"dead_for="
+                                f"{dead_for:.1f}s/"
+                                f"{BOSS_DEAD_CONFIRM_SECONDS:.1f}s"
+                            )
+                        )
+
+                        if alive:
+                            self._last_alive_debug_log_at = now
 
                     # ==================================
                     # Quét lại theo interval.
