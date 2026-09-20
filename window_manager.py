@@ -52,6 +52,21 @@ def find_window_for_pid(pid: int):
     win32gui.EnumWindows(callback, None)
     return found[0] if found else None
 
+def set_profile_window_title(hwnd: int, profile_name: str) -> None:
+    """Set the visible game window title to the configured profile name."""
+    if not hwnd or not win32gui.IsWindow(hwnd):
+        raise ValueError(f"Invalid HWND: {hwnd}")
+
+    title = str(profile_name).strip()
+    if not title:
+        raise ValueError("Profile name cannot be empty")
+
+    win32gui.SetWindowText(
+        hwnd,
+        title,
+    )
+
+
 def set_window_topmost(hwnd: int, enabled: bool = True) -> None:
     """
     Đặt cửa sổ game thành Always On Top mà không giành focus.
@@ -86,7 +101,9 @@ def acquire_profile_window(
     game_path,
     stop_event,
     timeout=30,
-    before_launch=None,):
+    before_launch=None,
+    window_title=None,
+):
 
     """Find a process inside this clone or launch it, then bind its own HWND."""
     clone = Path(game_path).resolve()
@@ -117,6 +134,11 @@ def acquire_profile_window(
         if game_process is not None and game_process.is_running():
             hwnd = find_window_for_pid(game_process.pid)
             if hwnd:
+                if window_title:
+                    set_profile_window_title(
+                        hwnd,
+                        window_title,
+                    )
                 return game_process.pid, hwnd, launched
         if launcher_pid is not None:
             try:
