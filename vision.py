@@ -1,10 +1,16 @@
 from dataclasses import dataclass
 from pathlib import Path
+import threading
 
 import cv2
 import numpy as np
 
 from automation_constants import BASE_HEIGHT, BASE_WIDTH
+
+# ImageGrab/GDI capture from many profile threads at the exact same instant
+# can create large latency spikes. Keep a small amount of parallelism while
+# preventing an unbounded capture burst.
+_SCREEN_CAPTURE_SEMAPHORE = threading.BoundedSemaphore(4)
 
 
 def scale_roi(base_roi, width: int, height: int):
@@ -55,14 +61,15 @@ def capture_client(hwnd: int) -> np.ndarray:
 
     left, top = win32gui.ClientToScreen(hwnd, (0, 0))
     width, height = get_client_size(hwnd)
-    image = ImageGrab.grab(
-        (
-            left,
-            top,
-            left + width,
-            top + height,
+    with _SCREEN_CAPTURE_SEMAPHORE:
+        image = ImageGrab.grab(
+            (
+                left,
+                top,
+                left + width,
+                top + height,
+            )
         )
-    )
     return cv2.cvtColor(
         np.array(image),
         cv2.COLOR_RGB2GRAY,
@@ -100,14 +107,15 @@ def capture_client_roi(
         (x, y),
     )
 
-    image = ImageGrab.grab(
-        (
-            left,
-            top,
-            left + w,
-            top + h,
+    with _SCREEN_CAPTURE_SEMAPHORE:
+        image = ImageGrab.grab(
+            (
+                left,
+                top,
+                left + w,
+                top + h,
+            )
         )
-    )
 
     return cv2.cvtColor(
         np.array(image),
