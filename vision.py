@@ -42,14 +42,107 @@ class MatchResult:
     location: tuple[int, int]
 
 
+def get_client_size(hwnd: int) -> tuple[int, int]:
+    import win32gui
+
+    rect = win32gui.GetClientRect(hwnd)
+    return rect[2], rect[3]
+
+
 def capture_client(hwnd: int) -> np.ndarray:
     from PIL import ImageGrab
     import win32gui
 
     left, top = win32gui.ClientToScreen(hwnd, (0, 0))
-    rect = win32gui.GetClientRect(hwnd)
-    image = ImageGrab.grab((left, top, left + rect[2], top + rect[3]))
-    return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
+    width, height = get_client_size(hwnd)
+    image = ImageGrab.grab(
+        (
+            left,
+            top,
+            left + width,
+            top + height,
+        )
+    )
+    return cv2.cvtColor(
+        np.array(image),
+        cv2.COLOR_RGB2GRAY,
+    )
+
+
+def capture_client_roi(
+    hwnd: int,
+    base_roi,
+) -> np.ndarray:
+    """
+    Capture only one base-space ROI from a game client.
+
+    The ROI is scaled to the current client resolution before
+    grabbing pixels, so boss scanning does not need to capture
+    and resize the entire game frame every second.
+    """
+    from PIL import ImageGrab
+    import win32gui
+
+    client_width, client_height = get_client_size(hwnd)
+    x, y, w, h = scale_roi(
+        base_roi,
+        client_width,
+        client_height,
+    )
+
+    x = max(0, min(x, client_width - 1))
+    y = max(0, min(y, client_height - 1))
+    w = max(1, min(w, client_width - x))
+    h = max(1, min(h, client_height - y))
+
+    left, top = win32gui.ClientToScreen(
+        hwnd,
+        (x, y),
+    )
+
+    image = ImageGrab.grab(
+        (
+            left,
+            top,
+            left + w,
+            top + h,
+        )
+    )
+
+    return cv2.cvtColor(
+        np.array(image),
+        cv2.COLOR_RGB2GRAY,
+    )
+
+
+def normalize_roi_to_base(
+    image: np.ndarray,
+    base_roi,
+) -> np.ndarray:
+    """Resize one captured ROI back to its canonical base size."""
+    _x, _y, target_width, target_height = base_roi
+    height, width = image.shape[:2]
+
+    if (
+        width == target_width
+        and height == target_height
+    ):
+        return image
+
+    interpolation = (
+        cv2.INTER_CUBIC
+        if width < target_width
+        or height < target_height
+        else cv2.INTER_AREA
+    )
+
+    return cv2.resize(
+        image,
+        (target_width, target_height),
+        interpolation=interpolation,
+    )
+
+
 def normalize_to_base(image: np.ndarray) -> np.ndarray:
     """
     Đưa mọi screenshot về canonical 860x484.
