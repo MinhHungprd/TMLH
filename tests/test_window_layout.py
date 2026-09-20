@@ -38,8 +38,9 @@ def test_stack_windows_for_boss_wraps_to_next_column():
             (1, 300, 200, 60),
             (2, 300, 200, 60),
             (3, 300, 200, 60),
+            (4, 300, 200, 60),
         ],
-        (0, 0, 800, 250),
+        (0, 0, 800, 300),
     )
 
     assert [
@@ -49,4 +50,5 @@ def test_stack_windows_for_boss_wraps_to_next_column():
         (0, 0),
         (0, 60),
         (300, 0),
+        (300, 60),
     ]
