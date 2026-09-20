@@ -33,6 +33,7 @@ from window_manager import (
     PROFILE_LAUNCH_LOCK,
     acquire_profile_window,
     ensure_client_size,
+    non_boss_window_visible,
     resize_client,
 )
 
@@ -365,60 +366,68 @@ class AutomationWorker:
 
             # ==========================================
             # Detect startup assets
+            #
+            # In overlap mode, only non-boss asset capture/click needs the
+            # whole game window visible. Temporarily raise this exact HWND,
+            # perform capture + click, then restore its stack position.
+            # Boss HP scanning never enters this context.
             # ==========================================
 
-            checks = (
-                self.detector
-                .check_signals(
-                    self.context
-                )
-            )
-
-            if self._halted():
-                return False
-
-            detected_checks = [
-                check
-                for check in checks
-                if check.detected
-            ]
-
-            # ==========================================
-            # Có signal -> chưa vào game
-            # ==========================================
-
-            if detected_checks:
-
-                absent_since = None
-
-                self._state(
-                    "WAITING_GAME"
+            with non_boss_window_visible(
+                self.context.window_handle
+            ):
+                checks = (
+                    self.detector
+                    .check_signals(
+                        self.context
+                    )
                 )
 
-                for check in detected_checks:
+                if self._halted():
+                    return False
 
-                    if self._halted():
-                        return False
+                detected_checks = [
+                    check
+                    for check in checks
+                    if check.detected
+                ]
 
-                    if (
-                        check.action
-                        == CLICK_CENTER
-                        and
-                        check.coordinates
-                        is not None
-                    ):
-                        self.input_manager.click_center(
-                            self.context.window_handle,
-                            check.coordinates,
-                            self.context.stop_event,
-                            self.context.process_id,
-                        )
+                # ======================================
+                # Có signal -> chưa vào game
+                # ======================================
+
+                if detected_checks:
+
+                    absent_since = None
+
+                    self._state(
+                        "WAITING_GAME"
+                    )
+
+                    for check in detected_checks:
+
+                        if self._halted():
+                            return False
+
+                        if (
+                            check.action
+                            == CLICK_CENTER
+                            and
+                            check.coordinates
+                            is not None
+                        ):
+                            self.input_manager.click_center(
+                                self.context.window_handle,
+                                check.coordinates,
+                                self.context.stop_event,
+                                self.context.process_id,
+                            )
 
             # ==========================================
             # Không còn startup signal
             # ==========================================
 
-            else:
+            if not detected_checks:
                 observed_at = self.now()
 
                 if absent_since is None:
