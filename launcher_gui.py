@@ -775,7 +775,7 @@ class LauncherApp(ctk.CTk):
         self,
         settings,
     ):
-        return verify_proxy_setup(
+        result = verify_proxy_setup(
             tuple(
                 self.controller.profiles
             ),
@@ -783,6 +783,61 @@ class LauncherApp(ctk.CTk):
             config_wait_seconds=8.0,
             proxy_timeout=5.0,
         )
+
+        proxy_ok = (
+            bool(result.proxy_results)
+            and all(
+                item.ok
+                for item
+                in result.proxy_results
+            )
+        )
+
+        details = ", ".join(
+            (
+                f"Proxy {index}: "
+                + (
+                    f"OK {item.latency_ms:.0f}ms"
+                    if item.ok
+                    else f"LỖI {item.detail}"
+                )
+            )
+            for index, item
+            in enumerate(
+                result.proxy_results,
+                start=1,
+            )
+        )
+
+        self._log_queue.put(
+            (
+                "Proxy",
+                (
+                    "VERIFY "
+                    + (
+                        "OK"
+                        if (
+                            result.config_applied
+                            and proxy_ok
+                        )
+                        else "CHƯA OK"
+                    )
+                    + " | config="
+                    + (
+                        "OK"
+                        if result.config_applied
+                        else "CHƯA KHỚP"
+                    )
+                    + (
+                        f" | {details}"
+                        if details
+                        else ""
+                    )
+                ),
+            )
+        )
+
+        return result
 
     def _ensure_proxy_routing_current(self):
         settings = self.proxy_settings_store.load()
