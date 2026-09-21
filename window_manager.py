@@ -99,16 +99,67 @@ def resolve_actual_game_pid(launcher_pid: int, game_path=None) -> int:
 
 
 def find_window_for_pid(pid: int):
+    """
+    Return the drawable top-level window owned by the target PID.
+
+    Unity can expose transient/helper top-level HWNDs whose client area is
+    0x0. Binding a profile to one of those handles makes screen capture fail
+    immediately. Ignore zero-area windows and prefer the largest drawable
+    client, which is the actual game window in normal operation.
+    """
     found = []
 
     def callback(hwnd, _):
-        if win32gui.IsWindowVisible(hwnd):
-            _, owner = win32process.GetWindowThreadProcessId(hwnd)
-            if owner == pid:
-                found.append(hwnd)
+        if not win32gui.IsWindowVisible(hwnd):
+            return
 
-    win32gui.EnumWindows(callback, None)
-    return found[0] if found else None
+        _, owner = (
+            win32process
+            .GetWindowThreadProcessId(hwnd)
+        )
+
+        if owner != pid:
+            return
+
+        try:
+            left, top, right, bottom = (
+                win32gui.GetClientRect(hwnd)
+            )
+        except win32gui.error:
+            return
+
+        width = max(
+            0,
+            right - left,
+        )
+        height = max(
+            0,
+            bottom - top,
+        )
+
+        if width <= 0 or height <= 0:
+            return
+
+        found.append(
+            (
+                width * height,
+                hwnd,
+            )
+        )
+
+    win32gui.EnumWindows(
+        callback,
+        None,
+    )
+
+    if not found:
+        return None
+
+    found.sort(
+        reverse=True,
+    )
+
+    return found[0][1]
 
 
 def boss_scan_reveal_height(
