@@ -131,8 +131,8 @@ def test_boss_scan_reveal_height_includes_client_top_and_hp_roi():
             padding=4,
         )
 
-    # title/client offset 30 + scaled boss y/h (3 + 8) + padding 4
-    assert reveal == 45
+    # title/client offset 30 + scaled combined scan y/h (3 + 15) + padding 4
+    assert reveal == 52
 
 
 def test_non_boss_window_visible_is_noop_when_stack_mode_is_off():
