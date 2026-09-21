@@ -59,6 +59,14 @@ class OcrService:
             "--psm 7"
         )
 
+        # Used for a vertically stacked set of preprocessing variants of the
+        # same short boss name. One Tesseract process reads the whole block,
+        # avoiding 2-3 separate process launches on difficult frames.
+        self.text_block_config = (
+            "--oem 3 "
+            "--psm 6"
+        )
+
     def read(self, image):
         wait_started = time.perf_counter()
         _OCR_SEMAPHORE.acquire()
@@ -115,6 +123,41 @@ class OcrService:
                 return pytesseract.image_to_string(
                     image,
                     config=self.text_config,
+                )
+            finally:
+                record_perf_ms(
+                    "ocr_ms",
+                    (
+                        time.perf_counter()
+                        - ocr_started
+                    )
+                    * 1000.0,
+                )
+        finally:
+            _OCR_SEMAPHORE.release()
+
+
+    def read_text_block(self, image):
+        """OCR a small multi-line text block through the shared OCR lock."""
+        wait_started = time.perf_counter()
+        _OCR_SEMAPHORE.acquire()
+
+        try:
+            record_perf_ms(
+                "wait_ocr_ms",
+                (
+                    time.perf_counter()
+                    - wait_started
+                )
+                * 1000.0,
+            )
+
+            ocr_started = time.perf_counter()
+
+            try:
+                return pytesseract.image_to_string(
+                    image,
+                    config=self.text_block_config,
                 )
             finally:
                 record_perf_ms(
