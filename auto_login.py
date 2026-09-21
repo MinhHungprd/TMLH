@@ -443,6 +443,12 @@ class AutoLoginRunner:
             0.45,
         )
 
+        if credentials.server not in SERVER_POINTS:
+            raise ValueError(
+                "Server 3 đã được nhập vào danh sách nhưng chưa có tọa độ "
+                "click để auto-login. Hãy cung cấp vị trí server 3."
+            )
+
         self._click(
             context,
             SERVER_POINTS[
