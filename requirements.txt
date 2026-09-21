@@ -3,6 +3,7 @@ pytesseract
 opencv-python
 numpy
 Pillow
+mss
 psutil
 pywin32
 frida-tools
