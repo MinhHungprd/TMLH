@@ -920,6 +920,10 @@ class AutomationWorker:
                         self.on_log(
                             (
                                 f"text={text!r} "
+                                f"ocr_raw="
+                                f"{debug.get('ocr_raw')!r} "
+                                f"ocr_candidates="
+                                f"{debug.get('ocr_candidates')!r} "
                                 f"ocr_alive={ocr_alive} "
                                 f"name_norm="
                                 f"{debug.get('name_normalized')!r} "
