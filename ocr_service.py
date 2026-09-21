@@ -51,6 +51,14 @@ class OcrService:
             "-c tessedit_char_whitelist=0123456789/.,"
         )
 
+        # Boss-name OCR: one short text line. Do not use a character
+        # whitelist here because Vietnamese accents may be read either with
+        # or without diacritics depending on the installed Tesseract data.
+        self.text_config = (
+            "--oem 3 "
+            "--psm 7"
+        )
+
     def read(self, image):
         wait_started = time.perf_counter()
         _OCR_SEMAPHORE.acquire()
@@ -71,6 +79,42 @@ class OcrService:
                 return pytesseract.image_to_string(
                     image,
                     config=self.config,
+                )
+            finally:
+                record_perf_ms(
+                    "ocr_ms",
+                    (
+                        time.perf_counter()
+                        - ocr_started
+                    )
+                    * 1000.0,
+                )
+        finally:
+            _OCR_SEMAPHORE.release()
+
+
+
+    def read_text(self, image):
+        """Read one short text line using the same serialized OCR worker."""
+        wait_started = time.perf_counter()
+        _OCR_SEMAPHORE.acquire()
+
+        try:
+            record_perf_ms(
+                "wait_ocr_ms",
+                (
+                    time.perf_counter()
+                    - wait_started
+                )
+                * 1000.0,
+            )
+
+            ocr_started = time.perf_counter()
+
+            try:
+                return pytesseract.image_to_string(
+                    image,
+                    config=self.text_config,
                 )
             finally:
                 record_perf_ms(
