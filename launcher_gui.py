@@ -9,6 +9,7 @@ import inspect
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog
 
@@ -355,6 +356,7 @@ class LauncherApp(ctk.CTk):
         self.window_layout_mode = "arrange"
         self._last_layout_signature = None
         self._suspend_keep_above = False
+        self._auto_login_active = set()
 
         # Worker OCR/debug logs are batched onto the Tk thread instead of
         # scheduling one GUI callback per profile per second.
@@ -1273,6 +1275,359 @@ class LauncherApp(ctk.CTk):
         if not self.selected_profile_id:
             raise ValueError("Hãy chọn một profile trước")
         return self.selected_profile_id
+
+    def _load_login_fields(
+        self,
+        profile_id,
+    ):
+        try:
+            profile = self.controller.get(
+                profile_id
+            )
+            credentials = (
+                load_login_credentials(
+                    profile.game_path
+                )
+            )
+        except (
+            StopIteration,
+            RuntimeError,
+        ) as exc:
+            self.login_username.set("")
+            self.login_password.set("")
+            self.login_server.set(
+                SERVER_LABELS["van_lang"]
+            )
+
+            if isinstance(
+                exc,
+                RuntimeError,
+            ):
+                self._log(
+                    profile_id,
+                    "WARN",
+                    str(exc),
+                )
+            return
+
+        if credentials is None:
+            self.login_username.set("")
+            self.login_password.set("")
+            self.login_server.set(
+                SERVER_LABELS["van_lang"]
+            )
+            return
+
+        self.login_username.set(
+            credentials.username
+        )
+        self.login_password.set(
+            credentials.password
+        )
+        self.login_server.set(
+            SERVER_LABELS[
+                credentials.server
+            ]
+        )
+
+    def _login_credentials_from_ui(
+        self,
+    ):
+        server_label = (
+            self.login_server.get()
+            .strip()
+        )
+        server = SERVER_KEYS.get(
+            server_label
+        )
+
+        if server is None:
+            raise ValueError(
+                f"Server không hợp lệ: {server_label}"
+            )
+
+        return LoginCredentials(
+            username=(
+                self.login_username
+                .get()
+                .strip()
+            ),
+            password=(
+                self.login_password
+                .get()
+            ),
+            server=server,
+        ).validate()
+
+    def _auto_login_selected(self):
+        try:
+            profile_id = (
+                self._selected_profile()
+            )
+            profile = self.controller.get(
+                profile_id
+            )
+
+            self.controller.manager.check_clone(
+                profile
+            )
+            self._ensure_proxy_routing_current()
+
+            credentials = (
+                self._login_credentials_from_ui()
+            )
+
+            save_login_credentials(
+                profile.game_path,
+                credentials,
+            )
+
+            if profile_id in self._auto_login_active:
+                raise ValueError(
+                    "Profile này đang auto login"
+                )
+
+            self._auto_login_active.add(
+                profile_id
+            )
+            self._suspend_keep_above = True
+
+            self._run_auto_login(
+                profile,
+                credentials,
+            )
+
+        except (
+            ValueError,
+            OSError,
+            RuntimeError,
+        ) as exc:
+            showerror(
+                "Auto Login",
+                str(exc),
+                parent=self,
+            )
+
+    def _run_auto_login(
+        self,
+        profile,
+        credentials,
+    ):
+        context = (
+            ProfileRuntimeContext
+            .from_profile(
+                profile
+            )
+        )
+        cancel = context.stop_event
+
+        self.creation_events[
+            profile.profile_id
+        ] = cancel
+
+        def post_status(state):
+            self.after(
+                0,
+                self._status,
+                profile.profile_id,
+                state.replace(
+                    "_",
+                    " ",
+                ).title(),
+            )
+
+        def post_log(message):
+            self._log_queue.put(
+                (
+                    profile.profile_id,
+                    message,
+                )
+            )
+
+        def work():
+            try:
+                self.after(
+                    0,
+                    self._status,
+                    profile.profile_id,
+                    "Launching Game",
+                )
+
+                with PROFILE_LAUNCH_LOCK:
+                    # Registry auth is global per Windows user. Clear only the
+                    # TMLH auth keys so a stale previous account cannot make a
+                    # failed fresh login look successful.
+                    clear_current_auth_values()
+
+                    (
+                        process_id,
+                        hwnd,
+                        _launched,
+                    ) = acquire_profile_window(
+                        profile.game_path,
+                        cancel,
+                        window_title=(
+                            profile.profile_name
+                        ),
+                    )
+
+                    context.process_id = (
+                        process_id
+                    )
+                    context.window_handle = hwnd
+
+                    resize_client(
+                        hwnd,
+                        profile.window_width,
+                        profile.window_height,
+                    )
+                    set_window_topmost(
+                        hwnd,
+                        True,
+                    )
+
+                    runner = AutoLoginRunner(
+                        on_status=post_status,
+                        on_log=post_log,
+                    )
+                    runner.run(
+                        context,
+                        credentials,
+                    )
+
+                    # Persist the registry auth only after the automated login
+                    # interaction has completed. Retry briefly because the
+                    # game may write its auth values asynchronously.
+                    deadline = (
+                        time.monotonic()
+                        + 20.0
+                    )
+                    last_error = None
+                    updated = None
+
+                    while (
+                        time.monotonic()
+                        < deadline
+                        and not cancel.is_set()
+                    ):
+                        try:
+                            updated = (
+                                self.controller
+                                .confirm_login(
+                                    profile.profile_id
+                                )
+                            )
+                            break
+                        except RuntimeError as exc:
+                            last_error = exc
+
+                        if cancel.wait(0.5):
+                            break
+
+                    if cancel.is_set():
+                        raise InterruptedError(
+                            "Auto login đã dừng"
+                        )
+
+                    if updated is None:
+                        raise RuntimeError(
+                            (
+                                "Đã thao tác đăng nhập nhưng chưa thấy "
+                                "auth mới của game trong Registry"
+                                + (
+                                    f": {last_error}"
+                                    if last_error
+                                    else ""
+                                )
+                            )
+                        )
+
+                self.after(
+                    0,
+                    self._auto_login_success,
+                    profile.profile_id,
+                    updated.profile_name,
+                )
+
+            except InterruptedError:
+                self.after(
+                    0,
+                    self._status,
+                    profile.profile_id,
+                    "Stopped",
+                )
+
+            except Exception as exc:
+                self.after(
+                    0,
+                    self._error,
+                    profile.profile_id,
+                    exc,
+                )
+                self.after(
+                    0,
+                    showerror,
+                    "Auto Login",
+                    str(exc),
+                    parent=self,
+                )
+
+            finally:
+                self.after(
+                    0,
+                    self._auto_login_finished,
+                    profile.profile_id,
+                )
+
+        threading.Thread(
+            target=work,
+            daemon=True,
+            name=(
+                f"auto-login-"
+                f"{profile.profile_id}"
+            ),
+        ).start()
+
+    def _auto_login_success(
+        self,
+        profile_id,
+        profile_name,
+    ):
+        self._status(
+            profile_id,
+            "Ready",
+        )
+        self._log(
+            profile_name,
+            "SUCCESS",
+            (
+                "Auto login thành công • "
+                "đã lưu auth riêng cho profile"
+            ),
+        )
+        showinfo(
+            "Auto Login",
+            (
+                f"{profile_name}: đăng nhập thành công.\n"
+                "Auth của profile đã được lưu riêng."
+            ),
+            parent=self,
+        )
+
+    def _auto_login_finished(
+        self,
+        profile_id,
+    ):
+        self._auto_login_active.discard(
+            profile_id
+        )
+        self._suspend_keep_above = bool(
+            self._auto_login_active
+        )
+        keep_above_game(
+            self
+        )
+
 
     def _change_profile_options(self, profile_id, boss_label, size):
         try:
