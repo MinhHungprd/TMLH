@@ -58,6 +58,7 @@ class AutoLoginRunner:
         now=None,
         on_status=None,
         on_log=None,
+        gameplay_ready=None,
     ):
         self.detector = (
             detector
@@ -85,6 +86,10 @@ class AutoLoginRunner:
         self.on_log = (
             on_log
             or (lambda _message: None)
+        )
+        self.gameplay_ready = (
+            gameplay_ready
+            or has_gameplay_socket
         )
 
     @staticmethod
@@ -568,7 +573,7 @@ class AutoLoginRunner:
             self.now() < deadline
             and not context.stop_event.is_set()
         ):
-            if has_gameplay_socket(
+            if self.gameplay_ready(
                 context.process_id
             ):
                 self.on_log(
