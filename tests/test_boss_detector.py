@@ -153,3 +153,52 @@ def test_ocr_service_default_reports_configuration_not_type_error(monkeypatch):
         match="Tesseract executable not found",
     ):
         OcrService()
+
+
+
+def test_default_debug_does_not_capture_full_frame(monkeypatch):
+    roi = np.zeros(
+        (22, 66),
+        dtype=np.uint8,
+    )
+    full_capture_calls = []
+
+    class OCR:
+        def read(self, image):
+            return ""
+
+    detector = BossDetector(
+        ocr=OCR(),
+        capture=lambda hwnd: (
+            full_capture_calls.append(hwnd)
+            or np.zeros(
+                (484, 860),
+                dtype=np.uint8,
+            )
+        ),
+        roi_capture=lambda hwnd, base_roi: roi.copy(),
+    )
+
+    context = type(
+        "Context",
+        (),
+        {
+            "window_handle": 7,
+            "window_width": 860,
+            "window_height": 484,
+            "profile_id": "p1",
+        },
+    )()
+
+    monkeypatch.setattr(
+        "boss_detector.cv2.imwrite",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "boss_detector.Path.mkdir",
+        lambda *args, **kwargs: None,
+    )
+
+    assert detector.read_hp(context) == ""
+    assert full_capture_calls == []
+    assert detector.last_debug["debug_dir"] is not None
