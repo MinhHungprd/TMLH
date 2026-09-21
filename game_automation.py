@@ -800,16 +800,23 @@ class AutomationWorker:
                     # Boss-name OCR detector
                     # ==================================
 
-                    name_alive = bool(
-                        debug.get(
-                            "name_alive",
-                            False,
+                    if "name_alive" in debug:
+                        name_alive = bool(
+                            debug.get(
+                                "name_alive",
+                                False,
+                            )
                         )
-                    )
+                    else:
+                        # Compatibility for injected/legacy detectors used
+                        # by tests or custom integrations.
+                        name_alive = (
+                            self.boss_detector
+                            .is_alive(text)
+                        )
 
-                    # Keep legacy debug fields available, but the current
-                    # boss decision is intentionally based on matching the
-                    # OCR'd name to context.selected_boss.
+                    # Production boss decisions now come from fuzzy matching
+                    # the OCR'd name to context.selected_boss.
                     ocr_alive = name_alive
                     visual_alive = False
 
