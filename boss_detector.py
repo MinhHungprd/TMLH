@@ -13,6 +13,7 @@ from automation_constants import (
     BOSS_ALIVE_MATCH_THRESHOLD,
     BOSS_ASSET_MISSES_BEFORE_OCR,
     BOSS_NAME_LABELS,
+    BOSS_OCR_ENABLED,
     BOSS_NAME_MATCH_COVERAGE,
     BOSS_NAME_MATCH_RATIO,
     BOSS_NAME_MIN_CHARS,
@@ -35,8 +36,8 @@ class BossDetector:
 
     The tiny asset__x443_y27_w12_h18.png marker is the primary signal. A
     successful template match means the boss is alive immediately. After
-    three consecutive asset misses, the existing boss-name OCR path is used
-    as a fallback so OCR remains available for template/capture failures.
+    OCR code is retained behind BOSS_OCR_ENABLED, but the current runtime
+    mode disables it so boss state is determined only by the asset signal.
     """
 
     def __init__(
@@ -958,6 +959,18 @@ class BossDetector:
                 asset_error=None,
                 fallback_ocr=False,
             )
+            return ""
+
+        if not BOSS_OCR_ENABLED:
+            self._set_asset_debug(
+                raw_width=raw_width,
+                raw_height=raw_height,
+                asset_score=asset_score,
+                asset_alive=False,
+                asset_error=asset_error,
+                fallback_ocr=False,
+            )
+            self.last_debug["chosen"] = "ocr_disabled"
             return ""
 
         text = self._read_name_impl(
