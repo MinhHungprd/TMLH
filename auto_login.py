@@ -547,4 +547,3 @@ class AutoLoginRunner:
         )
 
         return True
-        )
