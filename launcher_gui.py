@@ -2655,6 +2655,31 @@ class LauncherApp(ctk.CTk):
             ids,
         )
 
+    def _login_window_open(
+        self,
+        profile_id,
+    ):
+        context = self._login_contexts.get(
+            profile_id
+        )
+
+        if (
+            context is None
+            or not context.window_handle
+        ):
+            return False
+
+        try:
+            import win32gui
+
+            return bool(
+                win32gui.IsWindow(
+                    context.window_handle
+                )
+            )
+        except Exception:
+            return False
+
     def _finish_delete(
         self,
         ids,
@@ -2670,6 +2695,9 @@ class LauncherApp(ctk.CTk):
                 )
                 or profile_id
                 in self._auto_login_active
+                or self._login_window_open(
+                    profile_id
+                )
             )
         ]
 
