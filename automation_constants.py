@@ -17,6 +17,13 @@ BOSS_HP = (375, 8, 66, 22)
 GAME_START_WAIT = 10.0
 IN_GAME_CONFIRM_SECONDS = 3.0
 
+# UI/startup polling is intentionally relaxed. Automation decisions are
+# unchanged; a slightly slower poll avoids unnecessary capture churn.
+GAME_STATE_POLL_INTERVAL = 0.5
+
+# Stable boss-alive diagnostic logs do not need to update every few seconds.
+ALIVE_DEBUG_LOG_INTERVAL = 10.0
+
 BOSS_ENTER_WAIT = 3.0
 
 # Quét HP mỗi 1 giây.
