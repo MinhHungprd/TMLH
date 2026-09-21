@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from automation_constants import BASE_HEIGHT, BASE_WIDTH
+from perf_metrics import perf_timer
 
 # ImageGrab/GDI capture from many profile threads at the exact same instant
 # can create large latency spikes. Keep a small amount of parallelism while
@@ -59,21 +60,22 @@ def capture_client(hwnd: int) -> np.ndarray:
     from PIL import ImageGrab
     import win32gui
 
-    left, top = win32gui.ClientToScreen(hwnd, (0, 0))
-    width, height = get_client_size(hwnd)
-    with _SCREEN_CAPTURE_SEMAPHORE:
-        image = ImageGrab.grab(
-            (
-                left,
-                top,
-                left + width,
-                top + height,
+    with perf_timer("capture_ms"):
+        left, top = win32gui.ClientToScreen(hwnd, (0, 0))
+        width, height = get_client_size(hwnd)
+        with _SCREEN_CAPTURE_SEMAPHORE:
+            image = ImageGrab.grab(
+                (
+                    left,
+                    top,
+                    left + width,
+                    top + height,
+                )
             )
+        return cv2.cvtColor(
+            np.array(image),
+            cv2.COLOR_RGB2GRAY,
         )
-    return cv2.cvtColor(
-        np.array(image),
-        cv2.COLOR_RGB2GRAY,
-    )
 
 
 def capture_client_roi(
@@ -90,37 +92,38 @@ def capture_client_roi(
     from PIL import ImageGrab
     import win32gui
 
-    client_width, client_height = get_client_size(hwnd)
-    x, y, w, h = scale_roi(
-        base_roi,
-        client_width,
-        client_height,
-    )
-
-    x = max(0, min(x, client_width - 1))
-    y = max(0, min(y, client_height - 1))
-    w = max(1, min(w, client_width - x))
-    h = max(1, min(h, client_height - y))
-
-    left, top = win32gui.ClientToScreen(
-        hwnd,
-        (x, y),
-    )
-
-    with _SCREEN_CAPTURE_SEMAPHORE:
-        image = ImageGrab.grab(
-            (
-                left,
-                top,
-                left + w,
-                top + h,
-            )
+    with perf_timer("capture_ms"):
+        client_width, client_height = get_client_size(hwnd)
+        x, y, w, h = scale_roi(
+            base_roi,
+            client_width,
+            client_height,
         )
 
-    return cv2.cvtColor(
-        np.array(image),
-        cv2.COLOR_RGB2GRAY,
-    )
+        x = max(0, min(x, client_width - 1))
+        y = max(0, min(y, client_height - 1))
+        w = max(1, min(w, client_width - x))
+        h = max(1, min(h, client_height - y))
+
+        left, top = win32gui.ClientToScreen(
+            hwnd,
+            (x, y),
+        )
+
+        with _SCREEN_CAPTURE_SEMAPHORE:
+            image = ImageGrab.grab(
+                (
+                    left,
+                    top,
+                    left + w,
+                    top + h,
+                )
+            )
+
+        return cv2.cvtColor(
+            np.array(image),
+            cv2.COLOR_RGB2GRAY,
+        )
 
 
 def normalize_roi_to_base(
