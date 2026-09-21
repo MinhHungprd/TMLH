@@ -9,7 +9,7 @@ import win32con
 import win32gui
 import win32process
 
-from automation_constants import BASE_HEIGHT, BOSS_SCAN_ROI
+from automation_constants import BASE_HEIGHT, BOSS_NAME_ROI
 PROFILE_LAUNCH_LOCK = threading.Lock()
 
 _STACK_ORDER_LOCK = threading.RLock()
@@ -169,7 +169,7 @@ def boss_scan_reveal_height(
     """
     Outer-window height that must remain visible so the boss HP ROI stays
     fully exposed while windows are overlapped. The reveal now includes
-    both the HP digits and the new boss-alive marker search area.
+    the boss-name OCR box used by the current detector.
     """
     if not hwnd or not win32gui.IsWindow(hwnd):
         raise ValueError(f"Invalid HWND: {hwnd}")
@@ -179,7 +179,7 @@ def boss_scan_reveal_height(
     )
     _client_width, client_height = get_client_size(hwnd)
 
-    _x, base_y, _w, base_h = BOSS_SCAN_ROI
+    _x, base_y, _w, base_h = BOSS_NAME_ROI
     roi_y = round(
         base_y * client_height / BASE_HEIGHT
     )
