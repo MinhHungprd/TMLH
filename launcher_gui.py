@@ -26,9 +26,6 @@ from profile_auth import (
     save_profile_auth,
 )
 from profile_credentials import (
-    LoginCredentials,
-    SERVER_KEYS,
-    SERVER_LABELS,
     load_login_credentials,
     save_login_credentials,
 )
@@ -43,14 +40,8 @@ from proxy_manager import (
     verify_proxy_setup,
 )
 from proxy_ui import ProxySettingsDialog
-from ui_dialogs import (
-    askyesno,
-    keep_above_game,
-    showerror,
-    showinfo,
-    showwarning,
-)
-from ui_components import CompactCard, EditProfileDialog, ProfileRow, PROFILE_COLUMN_WIDTHS
+from ui_dialogs import keep_above_game
+from ui_components import CompactCard, ProfileRow, PROFILE_COLUMN_WIDTHS
 from ui_theme import APP_NAME, APP_VERSION, BOSS_KEYS, BOSS_LABELS, COLORS
 from window_layout import arrange_windows, stack_windows_for_boss
 from window_manager import (
@@ -367,13 +358,6 @@ class LauncherApp(ctk.CTk):
         settings = self.controller.settings_store.load()
 
         self.source = tk.StringVar(value=settings.game_source_path)
-        self.profile_name = tk.StringVar()
-        self.login_profile = tk.StringVar()
-        self.login_username = tk.StringVar()
-        self.login_password = tk.StringVar()
-        self.login_server = tk.StringVar(
-            value=SERVER_LABELS["van_lang"]
-        )
         self.sort_mode = tk.StringVar(value="A→Z")
         self.search_text = tk.StringVar()
         self.batch_size = tk.StringVar(
