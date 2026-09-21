@@ -187,65 +187,70 @@ def capture_client_roi(
     scheduling are centralized to reduce resource spikes.
     """
     import win32gui
+    from window_manager import boss_capture_visibility
 
-    with perf_timer("capture_ms"):
-        client_width, client_height = get_client_size(
-            hwnd
-        )
-        x, y, w, h = scale_roi(
-            base_roi,
-            client_width,
-            client_height,
-        )
-
-        x = max(
-            0,
-            min(
-                x,
-                client_width - 1,
-            ),
-        )
-        y = max(
-            0,
-            min(
-                y,
-                client_height - 1,
-            ),
-        )
-        w = max(
-            1,
-            min(
-                w,
-                client_width - x,
-            ),
-        )
-        h = max(
-            1,
-            min(
-                h,
-                client_height - y,
-            ),
-        )
-
-        left, top = win32gui.ClientToScreen(
-            hwnd,
-            (x, y),
-        )
-
-        try:
-            return SCREEN_CAPTURE_BROKER.capture_rect(
-                (
-                    left,
-                    top,
-                    w,
-                    h,
-                )
+    # Multiple boss readers may enter together and be batched. If a startup
+    # asset window is temporarily raised, this waits until its z-order is
+    # restored so boss ROIs cannot accidentally capture the wrong window.
+    with boss_capture_visibility():
+        with perf_timer("capture_ms"):
+            client_width, client_height = get_client_size(
+                hwnd
             )
-        except Exception:
-            return _capture_client_roi_pil(
-                hwnd,
+            x, y, w, h = scale_roi(
                 base_roi,
+                client_width,
+                client_height,
             )
+
+            x = max(
+                0,
+                min(
+                    x,
+                    client_width - 1,
+                ),
+            )
+            y = max(
+                0,
+                min(
+                    y,
+                    client_height - 1,
+                ),
+            )
+            w = max(
+                1,
+                min(
+                    w,
+                    client_width - x,
+                ),
+            )
+            h = max(
+                1,
+                min(
+                    h,
+                    client_height - y,
+                ),
+            )
+
+            left, top = win32gui.ClientToScreen(
+                hwnd,
+                (x, y),
+            )
+
+            try:
+                return SCREEN_CAPTURE_BROKER.capture_rect(
+                    (
+                        left,
+                        top,
+                        w,
+                        h,
+                    )
+                )
+            except Exception:
+                return _capture_client_roi_pil(
+                    hwnd,
+                    base_roi,
+                )
 
 
 def normalize_roi_to_base(
