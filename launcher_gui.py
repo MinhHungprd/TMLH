@@ -389,6 +389,20 @@ class LauncherApp(ctk.CTk):
                 if self.state() != "iconic":
                     self.lift()
 
+                # Keep modal/tool child windows above the launcher too.
+                for child in self.winfo_children():
+                    if isinstance(
+                        child,
+                        tk.Toplevel,
+                    ):
+                        try:
+                            if child.winfo_viewable():
+                                keep_above_game(
+                                    child
+                                )
+                        except tk.TclError:
+                            pass
+
                 self.after(
                     750,
                     self._keep_tool_above_games,
@@ -856,7 +870,7 @@ class LauncherApp(ctk.CTk):
             "SUCCESS",
             (
                 f"Đã gửi cấu hình tới {executable.name}; "
-                "ProxiFyre cần restart để áp dụng"
+                "đang chờ kiểm tra config + SOCKS5"
             ),
         )
 
