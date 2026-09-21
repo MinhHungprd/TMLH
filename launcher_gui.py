@@ -2100,6 +2100,8 @@ class LauncherApp(ctk.CTk):
             failed = []
 
             for entry in entries:
+                profile = None
+
                 try:
                     profile = (
                         self.controller
@@ -2146,6 +2148,16 @@ class LauncherApp(ctk.CTk):
                     )
 
                 except Exception as exc:
+                    # Do not leave a broken account/profile record behind when
+                    # clone or credential creation fails halfway through.
+                    if profile is not None:
+                        try:
+                            self.controller.delete_profile(
+                                profile.profile_id
+                            )
+                        except Exception:
+                            pass
+
                     failed.append(
                         (
                             entry.username,
