@@ -1,3 +1,5 @@
+import numpy as np
+
 from automation_constants import SIGNAL_1, SIGNAL_2, SIGNAL_3
 from game_state import CLICK_CENTER, GameStateDetector
 
@@ -18,3 +20,62 @@ def test_check_signals_scales_actions_per_profile_without_mouse_input():
     assert [check.action for check in checks] == [None, CLICK_CENTER, CLICK_CENTER]
     assert checks[1].coordinates == (284, 167)
     assert checks[2].coordinates == (160, 151)
+
+
+
+def test_native_asset_scan_crops_small_regions_without_full_frame_resize():
+    from profile_models import ProfileRuntimeContext
+
+    raw = np.zeros(
+        (180, 320),
+        dtype=np.uint8,
+    )
+
+    detector = GameStateDetector(
+        capture=lambda hwnd: raw,
+    )
+
+    seen = []
+
+    def match_region(
+        region,
+        asset_name,
+        search_roi,
+    ):
+        seen.append(
+            (
+                region.shape,
+                asset_name,
+                search_roi,
+            )
+        )
+        return "x742_y437" in asset_name
+
+    detector._match_region = match_region
+
+    ctx = ProfileRuntimeContext(
+        "id",
+        "p",
+        "path",
+        "trom_cho",
+        320,
+        180,
+    )
+    ctx.window_handle = 9
+
+    checks = detector.check_signals(ctx)
+
+    assert len(seen) == 3
+    assert all(
+        height < raw.shape[0]
+        and width < raw.shape[1]
+        for (height, width), _asset, _roi
+        in seen
+    )
+    assert checks[0].detected is False
+    assert checks[1].action == CLICK_CENTER
+    assert checks[1].coordinates == (
+        284,
+        167,
+    )
+    assert checks[2].detected is False
