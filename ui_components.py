@@ -6,6 +6,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
+from ui_dialogs import keep_above_game
 from ui_theme import BOSS_LABELS, COLORS, status_palette
 
 
@@ -213,6 +214,7 @@ class EditProfileDialog(ctk.CTkToplevel):
         self.configure(fg_color=COLORS["bg"])
         self.transient(master)
         self.grab_set()
+        keep_above_game(self)
 
         self.name_var = tk.StringVar(value=profile.profile_name)
 
