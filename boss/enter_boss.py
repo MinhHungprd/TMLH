@@ -16,6 +16,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import threading
 import time
 
 import frida
@@ -47,6 +48,11 @@ BOSSES = {
     "ngao_op":      0x6076,
     "dai_tho_san":  0x6077,
 }
+
+# Only one attach/load/detach operation at a time. Multiple simultaneous
+# Frida sessions create short CPU/context-switch spikes even when average
+# utilization remains low.
+_FRIDA_LOCK = threading.Lock()
 
 
 # ---------- Tạo gói ----------
@@ -180,13 +186,30 @@ def has_gameplay_socket(pid: int) -> bool:
     return False
 # ---------- Gửi ----------
 def send_packet(pid: int, packet: str, wait: float, stop_event=None) -> int:
-    with perf_timer("frida_ms"):
-        return _send_packet_impl(
-            pid,
-            packet,
-            wait,
-            stop_event,
-        )
+    wait_started = time.perf_counter()
+
+    with _FRIDA_LOCK:
+        try:
+            from perf_metrics import record_perf_ms
+
+            record_perf_ms(
+                "wait_frida_ms",
+                (
+                    time.perf_counter()
+                    - wait_started
+                )
+                * 1000.0,
+            )
+        except ModuleNotFoundError:
+            pass
+
+        with perf_timer("frida_ms"):
+            return _send_packet_impl(
+                pid,
+                packet,
+                wait,
+                stop_event,
+            )
 
 
 def _send_packet_impl(pid: int, packet: str, wait: float, stop_event=None) -> int:
