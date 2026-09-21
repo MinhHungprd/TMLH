@@ -1,12 +1,17 @@
 import re
 import time
 import unicodedata
+from pathlib import Path
 from difflib import SequenceMatcher
 
 import cv2
 import numpy as np
 
 from automation_constants import (
+    BOSS_ALIVE_ASSET,
+    BOSS_ALIVE_MARKER,
+    BOSS_ALIVE_MATCH_THRESHOLD,
+    BOSS_ASSET_MISSES_BEFORE_OCR,
     BOSS_NAME_LABELS,
     BOSS_NAME_MATCH_COVERAGE,
     BOSS_NAME_MATCH_RATIO,
@@ -26,16 +31,12 @@ from vision import (
 
 class BossDetector:
     """
-    Boss presence detector based on OCR of the boss-name box.
+    Asset-first boss presence detector with OCR safety fallback.
 
-    Production scans only BOSS_NAME_ROI=(361, 27, 91, 18). The same ROI is
-    preprocessed in several lightweight ways, stacked into one small image,
-    and sent through ONE Tesseract process. OCR output is then fuzzy-matched
-    against the selected boss name.
-
-    Negative OCR results are never cached: an identical difficult frame is
-    re-read on the next 1-second scan instead of repeating one bad OCR result.
-    Positive results may be cached while the pixels stay identical.
+    The tiny asset__x443_y27_w12_h18.png marker is the primary signal. A
+    successful template match means the boss is alive immediately. After
+    three consecutive asset misses, the existing boss-name OCR path is used
+    as a fallback so OCR remains available for template/capture failures.
     """
 
     def __init__(
@@ -44,6 +45,8 @@ class BossDetector:
         capture=None,
         roi_capture=None,
         *,
+        assets_dir=None,
+        marker_template=None,
         now=None,
     ):
         self.dead_streak = 0
@@ -59,6 +62,21 @@ class BossDetector:
 
         self.now = now or time.monotonic
         self.last_debug = {}
+
+        self.assets_dir = (
+            Path(assets_dir)
+            if assets_dir is not None
+            else (
+                Path(__file__).resolve().parent
+                / "assets"
+            )
+        )
+        self._marker_template = marker_template
+        self._marker_template_loaded = (
+            marker_template is not None
+        )
+        self._marker_template_error = None
+        self._asset_miss_streak = 0
 
         # Positive-only OCR cache.
         self._last_name_image = None
@@ -609,6 +627,197 @@ class BossDetector:
             best[6],
         )
 
+    def reset_cycle(self):
+        """Reset per-boss-cycle detector state without dropping OCR code."""
+        self._asset_miss_streak = 0
+
+    def _load_marker_template(self):
+        if self._marker_template_loaded:
+            return self._marker_template
+
+        self._marker_template_loaded = True
+        path = self.assets_dir / BOSS_ALIVE_ASSET
+
+        template = cv2.imread(
+            str(path),
+            cv2.IMREAD_GRAYSCALE,
+        )
+
+        if template is None:
+            self._marker_template_error = (
+                f"Boss marker asset not found: {path}"
+            )
+            return None
+
+        expected_shape = (
+            BOSS_ALIVE_MARKER[3],
+            BOSS_ALIVE_MARKER[2],
+        )
+
+        if template.shape != expected_shape:
+            self._marker_template_error = (
+                "Boss marker asset has unexpected "
+                f"shape {template.shape!r}; "
+                f"expected {expected_shape!r}"
+            )
+            return None
+
+        self._marker_template = template
+        return template
+
+    def _capture_asset_roi(
+        self,
+        context,
+    ):
+        raw_width = int(
+            getattr(
+                context,
+                "window_width",
+                0,
+            )
+            or 0
+        )
+        raw_height = int(
+            getattr(
+                context,
+                "window_height",
+                0,
+            )
+            or 0
+        )
+
+        if self.roi_capture is not None:
+            if (
+                raw_width <= 0
+                or raw_height <= 0
+            ):
+                (
+                    raw_width,
+                    raw_height,
+                ) = get_client_size(
+                    context.window_handle
+                )
+
+            raw_roi = self.roi_capture(
+                context.window_handle,
+                BOSS_ALIVE_MARKER,
+            )
+            roi = normalize_roi_to_base(
+                raw_roi,
+                BOSS_ALIVE_MARKER,
+            )
+            return (
+                roi,
+                raw_width,
+                raw_height,
+            )
+
+        raw = self.capture(
+            context.window_handle
+        )
+        raw_height, raw_width = raw.shape[:2]
+        normalized = normalize_to_base(
+            raw
+        )
+        x, y, w, h = BOSS_ALIVE_MARKER
+        roi = normalized[
+            y:y + h,
+            x:x + w,
+        ]
+
+        return (
+            roi,
+            raw_width,
+            raw_height,
+        )
+
+    def _match_asset(
+        self,
+        roi,
+    ):
+        template = self._load_marker_template()
+
+        if (
+            template is None
+            or roi is None
+            or roi.size == 0
+        ):
+            return (
+                False,
+                0.0,
+                self._marker_template_error
+                or "marker ROI unavailable",
+            )
+
+        if roi.shape != template.shape:
+            roi = cv2.resize(
+                roi,
+                (
+                    template.shape[1],
+                    template.shape[0],
+                ),
+                interpolation=cv2.INTER_CUBIC,
+            )
+
+        score = float(
+            cv2.matchTemplate(
+                roi,
+                template,
+                cv2.TM_CCOEFF_NORMED,
+            ).max()
+        )
+
+        return (
+            score >= BOSS_ALIVE_MATCH_THRESHOLD,
+            score,
+            None,
+        )
+
+    def _set_asset_debug(
+        self,
+        *,
+        raw_width,
+        raw_height,
+        asset_score,
+        asset_alive,
+        asset_error,
+        fallback_ocr=False,
+    ):
+        self.last_debug = {
+            "raw_size": (
+                raw_width,
+                raw_height,
+            ),
+            "roi": BOSS_ALIVE_MARKER,
+            "roi_shape": (
+                BOSS_ALIVE_MARKER[2],
+                BOSS_ALIVE_MARKER[3],
+            ),
+            "chosen": "asset",
+            "text": "",
+            "asset_alive": asset_alive,
+            "asset_score": round(
+                float(asset_score),
+                4,
+            ),
+            "asset_miss_streak": (
+                self._asset_miss_streak
+            ),
+            "asset_error": asset_error,
+            "fallback_ocr": fallback_ocr,
+            "name_alive": False,
+            "name_normalized": "",
+            "name_expected": "",
+            "name_ratio": 0.0,
+            "name_coverage": 0.0,
+            "ocr_raw": "",
+            "ocr_candidates": [],
+            "cache_hit": False,
+            "alive": asset_alive,
+            "attempts": [],
+            "debug_dir": None,
+        }
+
     def _capture_name_roi(
         self,
         context,
@@ -687,13 +896,102 @@ class BossDetector:
         self,
         context,
     ) -> str:
-        # Public name kept to avoid changing worker integration.
+        # Public method name is kept for worker compatibility.
         with perf_timer(
             "vision_ms"
         ):
-            return self._read_name_impl(
+            return self._read_asset_first_impl(
                 context
             )
+
+    def _read_asset_first_impl(
+        self,
+        context,
+    ) -> str:
+        (
+            asset_roi,
+            raw_width,
+            raw_height,
+        ) = self._capture_asset_roi(
+            context
+        )
+
+        (
+            asset_alive,
+            asset_score,
+            asset_error,
+        ) = self._match_asset(
+            asset_roi
+        )
+
+        if asset_alive:
+            self._asset_miss_streak = 0
+            self._set_asset_debug(
+                raw_width=raw_width,
+                raw_height=raw_height,
+                asset_score=asset_score,
+                asset_alive=True,
+                asset_error=asset_error,
+                fallback_ocr=False,
+            )
+            return ""
+
+        self._asset_miss_streak += 1
+
+        # Give the cheap template three consecutive scans before invoking the
+        # heavier OCR safety path. The worker's existing >=3-second continuous
+        # miss confirmation remains unchanged.
+        if (
+            asset_error is None
+            and self._asset_miss_streak
+            < BOSS_ASSET_MISSES_BEFORE_OCR
+        ):
+            self._set_asset_debug(
+                raw_width=raw_width,
+                raw_height=raw_height,
+                asset_score=asset_score,
+                asset_alive=False,
+                asset_error=None,
+                fallback_ocr=False,
+            )
+            return ""
+
+        text = self._read_name_impl(
+            context
+        )
+
+        debug = dict(
+            self.last_debug
+        )
+        name_alive = bool(
+            debug.get(
+                "name_alive",
+                False,
+            )
+        )
+
+        if name_alive:
+            # OCR rescued a template miss; restart the three-scan asset window.
+            self._asset_miss_streak = 0
+
+        debug.update(
+            {
+                "asset_alive": False,
+                "asset_score": round(
+                    float(asset_score),
+                    4,
+                ),
+                "asset_miss_streak": (
+                    self._asset_miss_streak
+                ),
+                "asset_error": asset_error,
+                "fallback_ocr": True,
+                "alive": name_alive,
+            }
+        )
+        self.last_debug = debug
+
+        return text
 
     def _read_name_impl(
         self,
