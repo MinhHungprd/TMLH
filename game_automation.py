@@ -533,8 +533,9 @@ class AutomationWorker:
                         return True
 
                     # Startup:
-                    # ngoài signal biến mất
-                    # còn yêu cầu PID có socket :1002.
+                    # ngoài signal biến mất còn yêu cầu đúng PID có ít nhất
+                    # một TCP connection ESTABLISHED. Không hard-code :1002
+                    # vì server/route khác có thể dùng remote port khác.
                     if self.gameplay_ready(
                         self.context.process_id
                     ):
