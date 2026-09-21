@@ -53,6 +53,10 @@ class Socks5Proxy:
 class ProxySettings:
     proxifyre_path: str = ""
     proxies: tuple[Socks5Proxy, ...] = ()
+    # Test mode lets a small local setup verify transparent game routing:
+    # profile 1 stays Direct, profile 2 uses proxy 1, profile 3 uses proxy 2,
+    # and any remaining profiles reuse the last configured proxy.
+    test_mode: bool = False
 
 
 def parse_proxy_line(value: str) -> Socks5Proxy:
@@ -143,14 +147,43 @@ def proxy_for_profile_index(
     )
 
 
+def proxy_for_test_profile_index(
+    index: int,
+    proxy_count: int,
+) -> int | None:
+    """
+    Small-batch proxy validation mode.
+
+    profile 1 -> Direct
+    profile 2 -> proxy 1
+    profile 3 -> proxy 2
+    ...
+    profiles beyond the configured proxy count reuse the final proxy.
+    """
+    if index <= 0 or proxy_count <= 0:
+        return None
+
+    return min(
+        index - 1,
+        proxy_count - 1,
+    )
+
+
 def assign_profile_proxies(
     profiles,
     proxies,
+    *,
+    test_mode: bool = False,
 ) -> dict[str, int | None]:
     proxy_count = len(proxies)
+    resolver = (
+        proxy_for_test_profile_index
+        if test_mode
+        else proxy_for_profile_index
+    )
 
     return {
-        profile.profile_id: proxy_for_profile_index(
+        profile.profile_id: resolver(
             index,
             proxy_count,
         )
@@ -169,17 +202,25 @@ def game_executable_path(profile) -> Path:
 def build_proxifyre_config(
     profiles,
     proxies,
+    *,
+    test_mode: bool = False,
 ) -> dict:
     """
     Build a ProxiFyre configuration with one route per proxy.
 
-    Only profiles beyond the first 30 are included. Unmatched applications
-    stay direct, so profiles 1..30 keep using the machine's normal network.
+    Normal mode:
+        only profiles beyond the first 30 are included.
+
+    Test mode:
+        profile 1 stays direct and profile 2+ are routed immediately so a
+        machine with only two game tabs can verify that ProxiFyre routing
+        actually works.
     """
     proxies = tuple(proxies)
     assignments = assign_profile_proxies(
         profiles,
         proxies,
+        test_mode=test_mode,
     )
 
     grouped_paths: list[list[str]] = [
@@ -277,6 +318,12 @@ class ProxySettingsStorage:
                 )
             ),
             proxies=proxies,
+            test_mode=bool(
+                payload.get(
+                    "test_mode",
+                    False,
+                )
+            ),
         )
 
     def save(
@@ -293,6 +340,9 @@ class ProxySettingsStorage:
                     asdict(proxy)
                     for proxy in settings.proxies
                 ],
+                "test_mode": bool(
+                    settings.test_mode
+                ),
             },
             ensure_ascii=False,
         ).encode("utf-8")
@@ -354,6 +404,7 @@ def write_runtime_config(
     config = build_proxifyre_config(
         profiles,
         settings.proxies,
+        test_mode=settings.test_mode,
     )
 
     runtime_dir = (
@@ -591,6 +642,7 @@ def routing_config_matches(
     expected = build_proxifyre_config(
         profiles,
         settings.proxies,
+        test_mode=settings.test_mode,
     )
 
     return current == expected
