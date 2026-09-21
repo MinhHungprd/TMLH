@@ -306,6 +306,10 @@ class BossCaptureBroker:
             )
             * 1000.0,
         )
+        record_perf_ms(
+            "boss_batch_size",
+            float(len(batch)),
+        )
 
     @staticmethod
     def _capture_group(
