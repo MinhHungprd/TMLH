@@ -2245,6 +2245,26 @@ class LauncherApp(ctk.CTk):
             )
             return
 
+        active_workers = [
+            profile.profile_id
+            for profile
+            in self.controller.profiles
+            if self.controller._worker_is_active(
+                profile.profile_id
+            )
+        ]
+
+        if active_workers:
+            self._notify(
+                (
+                    "Không thể Login account mới khi bot đang chạy profile khác. "
+                    "Auth game dùng chung Registry Windows; hãy Stop toàn bộ trước "
+                    "để tránh account của profile này đè profile khác."
+                ),
+                "warning",
+            )
+            return
+
         self._login_queue = list(
             profile_ids
         )
@@ -2253,8 +2273,8 @@ class LauncherApp(ctk.CTk):
 
         self._notify(
             (
-                f"Bắt đầu Login "
-                f"{len(self._login_queue)} tài khoản..."
+                f"Login an toàn {len(self._login_queue)} tài khoản • "
+                "mỗi account được mở riêng, lưu auth, đóng game rồi mới tới account kế tiếp"
             ),
             "info",
         )
@@ -2321,6 +2341,81 @@ class LauncherApp(ctk.CTk):
                 100,
                 self._run_next_login,
             )
+
+    @staticmethod
+    def _close_login_process(
+        context,
+        *,
+        timeout=4.0,
+    ):
+        """
+        Close the game used only for credential enrollment.
+
+        TMLH auth lives in one HKCU Registry path shared by every clone.
+        Leaving account A running while logging account B allows A to write
+        shared auth again and contaminate B's saved profile auth.
+        """
+        import psutil
+        import win32con
+        import win32gui
+
+        hwnd = context.window_handle
+        pid = context.process_id
+
+        if (
+            hwnd
+            and win32gui.IsWindow(
+                hwnd
+            )
+        ):
+            try:
+                win32gui.PostMessage(
+                    hwnd,
+                    win32con.WM_CLOSE,
+                    0,
+                    0,
+                )
+            except Exception:
+                pass
+
+        if not pid:
+            return
+
+        try:
+            process = psutil.Process(
+                pid
+            )
+        except psutil.Error:
+            return
+
+        try:
+            process.wait(
+                timeout=timeout
+            )
+            return
+        except psutil.TimeoutExpired:
+            pass
+        except psutil.Error:
+            return
+
+        # This process is an enrollment/login client, not an active bot
+        # session. Terminate it if Unity ignores WM_CLOSE so the next account
+        # cannot inherit a live Registry writer from the previous account.
+        try:
+            process.terminate()
+            process.wait(
+                timeout=2.0
+            )
+        except psutil.TimeoutExpired:
+            try:
+                process.kill()
+                process.wait(
+                    timeout=1.0
+                )
+            except psutil.Error:
+                pass
+        except psutil.Error:
+            pass
 
     def _run_auto_login(
         self,
@@ -2503,6 +2598,20 @@ class LauncherApp(ctk.CTk):
                 )
 
             finally:
+                if callable(
+                    on_complete
+                ):
+                    try:
+                        self._close_login_process(
+                            context
+                        )
+                    finally:
+                        # Clear only after the old game process is gone. Some
+                        # clients write Registry again while shutting down.
+                        clear_current_auth_values()
+                        context.window_handle = None
+                        context.process_id = None
+
                 self.after(
                     0,
                     self._auto_login_finished,
@@ -2552,6 +2661,15 @@ class LauncherApp(ctk.CTk):
         self._auto_login_active.discard(
             profile_id
         )
+
+        if callable(
+            on_complete
+        ):
+            self._login_contexts.pop(
+                profile_id,
+                None,
+            )
+
         self._apply_window_layout()
 
         if callable(on_complete):
@@ -2954,6 +3072,16 @@ class LauncherApp(ctk.CTk):
         self._apply_window_layout()
 
     def _start_selected(self):
+        if self._login_queue_active:
+            self._notify(
+                (
+                    "Đang Login tài khoản. Chờ hàng đợi Login hoàn tất rồi mới Start "
+                    "để không ghi đè Registry auth."
+                ),
+                "warning",
+            )
+            return
+
         ids = self._selected_ids()
 
         if not ids:
