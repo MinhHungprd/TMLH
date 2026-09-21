@@ -7,6 +7,7 @@ import numpy as np
 
 from automation_constants import BOSS_HP
 from ocr_service import OcrService
+from perf_metrics import perf_timer
 from vision import (
     capture_client,
     capture_client_roi,
@@ -33,6 +34,7 @@ class BossDetector:
         *,
         debug_interval=10.0,
         now=None,
+        full_debug=False,
     ):
         self.dead_streak = 0
         self.ocr = ocr
@@ -49,6 +51,7 @@ class BossDetector:
 
         self.debug_interval = float(debug_interval)
         self.now = now or time.monotonic
+        self.full_debug = bool(full_debug)
         self._last_debug_at = None
         self.last_debug = {}
 
@@ -151,10 +154,11 @@ class BossDetector:
         inverted,
     ):
         """
-        Overwrite only the latest diagnostic images.
+        Keep normal failure diagnostics tiny.
 
-        The normal boss scan is ROI-only. A full-frame screenshot is captured
-        here only when a throttled failure diagnostic is actually written.
+        Default runtime writes only the canonical HP ROI. Full-frame capture
+        and the four extra PNGs are available only when full_debug=True, so a
+        group of dead bosses cannot create a screenshot/disk-I/O spike.
         """
         profile_id = getattr(
             context,
@@ -169,53 +173,57 @@ class BossDetector:
             / str(profile_id)
         )
 
-        debug_dir.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        if normalized is None:
-            raw = self.capture(
-                context.window_handle
-            )
-            normalized = normalize_to_base(
-                raw
+        with perf_timer("debug_io_ms"):
+            debug_dir.mkdir(
+                parents=True,
+                exist_ok=True,
             )
 
-        frame = normalized.copy()
+            cv2.imwrite(
+                str(debug_dir / "last_roi.png"),
+                roi,
+            )
 
-        x, y, w, h = BOSS_HP
+            if self.full_debug:
+                if normalized is None:
+                    raw = self.capture(
+                        context.window_handle
+                    )
+                    normalized = normalize_to_base(
+                        raw
+                    )
 
-        cv2.rectangle(
-            frame,
-            (x, y),
-            (x + w, y + h),
-            255,
-            1,
-        )
+                frame = normalized.copy()
 
-        cv2.imwrite(
-            str(debug_dir / "last_frame.png"),
-            frame,
-        )
-        cv2.imwrite(
-            str(debug_dir / "last_roi.png"),
-            roi,
-        )
-        cv2.imwrite(
-            str(debug_dir / "last_upscaled.png"),
-            upscaled,
-        )
-        cv2.imwrite(
-            str(debug_dir / "last_binary.png"),
-            binary,
-        )
-        cv2.imwrite(
-            str(debug_dir / "last_inverted.png"),
-            inverted,
-        )
+                x, y, w, h = BOSS_HP
+
+                cv2.rectangle(
+                    frame,
+                    (x, y),
+                    (x + w, y + h),
+                    255,
+                    1,
+                )
+
+                cv2.imwrite(
+                    str(debug_dir / "last_frame.png"),
+                    frame,
+                )
+                cv2.imwrite(
+                    str(debug_dir / "last_upscaled.png"),
+                    upscaled,
+                )
+                cv2.imwrite(
+                    str(debug_dir / "last_binary.png"),
+                    binary,
+                )
+                cv2.imwrite(
+                    str(debug_dir / "last_inverted.png"),
+                    inverted,
+                )
 
         return debug_dir
+
 
     def _capture_roi(self, context):
         """
@@ -323,6 +331,12 @@ class BossDetector:
         }
 
     def read_hp(self, context) -> str:
+        with perf_timer("vision_ms"):
+            return self._read_hp_impl(
+                context
+            )
+
+    def _read_hp_impl(self, context) -> str:
         roi, normalized, raw_width, raw_height = (
             self._capture_roi(context)
         )
