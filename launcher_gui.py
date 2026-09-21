@@ -2447,10 +2447,8 @@ class LauncherApp(ctk.CTk):
             profile_id,
             None,
         )
-        self._login_contexts.pop(
-            profile_id,
-            None,
-        )
+        # Keep the opened game context after login so later accounts can be
+        # arranged/chồng together with earlier logged-in windows.
         self._auto_login_active.discard(
             profile_id
         )
@@ -2620,6 +2618,37 @@ class LauncherApp(ctk.CTk):
         self._stop_profile_ids(
             ids
         )
+
+        try:
+            import win32con
+            import win32gui
+
+            for profile_id in ids:
+                context = (
+                    self._login_contexts
+                    .get(profile_id)
+                )
+                hwnd = (
+                    context.window_handle
+                    if context is not None
+                    else None
+                )
+
+                if (
+                    hwnd
+                    and win32gui.IsWindow(
+                        hwnd
+                    )
+                ):
+                    win32gui.PostMessage(
+                        hwnd,
+                        win32con.WM_CLOSE,
+                        0,
+                        0,
+                    )
+        except Exception:
+            pass
+
         self.after(
             700,
             self._finish_delete,
@@ -2640,7 +2669,7 @@ class LauncherApp(ctk.CTk):
                     profile_id
                 )
                 or profile_id
-                in self._login_contexts
+                in self._auto_login_active
             )
         ]
 
@@ -2674,6 +2703,10 @@ class LauncherApp(ctk.CTk):
                 )
                 self.checked.discard(
                     profile_id
+                )
+                self._login_contexts.pop(
+                    profile_id,
+                    None,
                 )
                 deleted += 1
             except Exception as exc:
@@ -3276,6 +3309,15 @@ class LauncherApp(ctk.CTk):
         self._log(profile_id, "INFO", message)
 
     def _worker_status(self, profile_id, state):
+        if state not in (
+            "STOPPED",
+            "ERROR",
+        ):
+            self._login_contexts.pop(
+                profile_id,
+                None,
+            )
+
         pretty = state.replace("_", " ").title()
         self._apply_runtime_status(
             profile_id,
@@ -3352,6 +3394,20 @@ class LauncherApp(ctk.CTk):
                 try:
                     set_window_topmost(hwnd, False)
                 except (ValueError, OSError):
+                    pass
+
+        for context in self._login_contexts.values():
+            hwnd = context.window_handle
+            if hwnd:
+                try:
+                    set_window_topmost(
+                        hwnd,
+                        False,
+                    )
+                except (
+                    ValueError,
+                    OSError,
+                ):
                     pass
 
         self.destroy()
