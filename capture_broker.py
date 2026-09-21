@@ -1,14 +1,12 @@
-"""On-demand batched screen capture for boss HP ROIs.
+"""Low-impact on-demand batched screen capture.
 
-The broker is deliberately NOT a video/continuous capture loop.
+The broker is deliberately NOT a video/continuous capture loop. Every game
+worker requests a frame only when its existing state machine needs one.
 
-Each caller asks for one screen rectangle only when its existing automation
-loop needs a boss scan. Requests that arrive within a very small coalescing
-window are captured together with one MSS grab per monitor, then cropped back
-into independent grayscale NumPy arrays for the original callers.
-
-This keeps the worker/boss-decision logic unchanged while reducing duplicate
-Windows capture calls when many profile scans land at nearly the same time.
+All capture requests share one MSS worker thread. Requests arriving inside a
+small smoothing window are merged into one grab per monitor and then cropped
+back into independent grayscale NumPy arrays. This trades a little latency
+for fewer capture bursts, lower contention, and smoother multi-profile runs.
 """
 
 from __future__ import annotations
@@ -24,8 +22,8 @@ import numpy as np
 from perf_metrics import record_perf_ms
 
 
-BOSS_CAPTURE_COALESCE_SECONDS = 0.015
-BOSS_CAPTURE_TIMEOUT_SECONDS = 1.0
+CAPTURE_COALESCE_SECONDS = 0.12
+CAPTURE_TIMEOUT_SECONDS = 2.0
 
 
 @dataclass
@@ -40,8 +38,8 @@ class BossCaptureBroker:
     def __init__(
         self,
         *,
-        coalesce_seconds: float = BOSS_CAPTURE_COALESCE_SECONDS,
-        timeout_seconds: float = BOSS_CAPTURE_TIMEOUT_SECONDS,
+        coalesce_seconds: float = CAPTURE_COALESCE_SECONDS,
+        timeout_seconds: float = CAPTURE_TIMEOUT_SECONDS,
         grabber_factory=None,
         monitor_key=None,
     ):
@@ -100,7 +98,7 @@ class BossCaptureBroker:
 
         if self._disabled_error is not None:
             raise RuntimeError(
-                "MSS boss capture is unavailable"
+                "MSS screen capture is unavailable"
             ) from self._disabled_error
 
         thread = self._thread
@@ -123,7 +121,7 @@ class BossCaptureBroker:
             self._thread = threading.Thread(
                 target=self._run,
                 daemon=True,
-                name="boss-capture-broker",
+                name="screen-capture-broker",
             )
             self._thread.start()
 
@@ -159,17 +157,17 @@ class BossCaptureBroker:
             self.timeout_seconds
         ):
             raise TimeoutError(
-                "MSS boss capture timed out"
+                "MSS screen capture timed out"
             )
 
         if request.error is not None:
             raise RuntimeError(
-                "MSS boss capture failed"
+                "MSS screen capture failed"
             ) from request.error
 
         if request.result is None:
             raise RuntimeError(
-                "MSS boss capture returned no frame"
+                "MSS screen capture returned no frame"
             )
 
         return request.result
@@ -299,7 +297,7 @@ class BossCaptureBroker:
             )
 
         record_perf_ms(
-            "boss_batch_ms",
+            "capture_batch_ms",
             (
                 time.perf_counter()
                 - started
@@ -307,7 +305,7 @@ class BossCaptureBroker:
             * 1000.0,
         )
         record_perf_ms(
-            "boss_batch_size",
+            "capture_batch_size",
             float(len(batch)),
         )
 
@@ -403,4 +401,7 @@ class BossCaptureBroker:
             request.result = gray
 
 
-BOSS_CAPTURE_BROKER = BossCaptureBroker()
+SCREEN_CAPTURE_BROKER = BossCaptureBroker()
+
+# Backward-compatible alias for older imports.
+BOSS_CAPTURE_BROKER = SCREEN_CAPTURE_BROKER
