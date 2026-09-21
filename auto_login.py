@@ -35,8 +35,11 @@ LOGIN_SUBMIT_POINT = (439, 307)
 
 LOGIN_SIGNAL_TIMEOUT = 45.0
 LOGIN_SECOND_SIGNAL_TIMEOUT = 25.0
-LOGIN_START_OPTIONAL_TIMEOUT = 12.0
-LOGIN_SCAN_INTERVAL = 0.5
+# After submit, the Start button normally appears quickly. Keep this optional
+# window short so a missing S3 does not delay auth confirmation for 12s.
+LOGIN_START_OPTIONAL_TIMEOUT = 4.0
+LOGIN_SCAN_INTERVAL = 0.35
+LOGIN_POST_SUBMIT_SETTLE = 0.35
 
 
 class AutoLoginRunner:
@@ -468,7 +471,7 @@ class AutoLoginRunner:
         )
         self._wait_short(
             context,
-            1.0,
+            LOGIN_POST_SUBMIT_SETTLE,
         )
 
         self.on_status(
