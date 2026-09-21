@@ -8,9 +8,10 @@ import pytesseract
 from perf_metrics import record_perf_ms
 
 
-# Tesseract starts an external process per OCR call. Limiting concurrent
-# calls prevents many profiles from spiking CPU at the same instant.
-_OCR_SEMAPHORE = threading.BoundedSemaphore(2)
+# Tesseract starts an external process per OCR call. Keep exactly one OCR
+# process active at a time to avoid short CPU/process-creation spikes that can
+# make Windows feel laggy even when average CPU usage looks low.
+_OCR_SEMAPHORE = threading.BoundedSemaphore(1)
 
 
 class OcrConfigurationError(RuntimeError):
