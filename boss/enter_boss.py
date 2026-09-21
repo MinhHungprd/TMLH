@@ -21,7 +21,17 @@ import time
 import frida
 import psutil
 
-from perf_metrics import perf_timer
+try:
+    from perf_metrics import perf_timer
+except ModuleNotFoundError:
+    # Keep the standalone boss/enter_boss.py CLI usable even when the
+    # repository root is not on sys.path. The desktop bot imports the real
+    # profiler from the project root.
+    from contextlib import contextmanager
+
+    @contextmanager
+    def perf_timer(_name):
+        yield
 
 
 GAMEPLAY_PORT = 1002
