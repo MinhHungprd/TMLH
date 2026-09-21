@@ -26,6 +26,7 @@ from boss.enter_boss import (
 from boss_detector import BossDetector
 from game_state import CLICK_CENTER, GameStateDetector
 from input_manager import InputManager
+from perf_metrics import PERF_METRICS, format_perf_report
 from profile_manager import MissingGameFilesError
 from profile_auth import restore_profile_auth
 
@@ -297,6 +298,17 @@ class AutomationWorker:
             .is_set()
         )
 
+
+    def _emit_perf_if_due(self):
+        report = PERF_METRICS.drain_if_due()
+
+        if report:
+            self.on_log(
+                format_perf_report(
+                    report
+                )
+            )
+
     def _ensure_in_game(
         self,
         require_gameplay_socket=False,
@@ -382,6 +394,8 @@ class AutomationWorker:
                         self.context
                     )
                 )
+
+                self._emit_perf_if_due()
 
                 if self._halted():
                     return False
@@ -585,6 +599,8 @@ class AutomationWorker:
                     self.context.selected_boss,
                 )
 
+                self._emit_perf_if_due()
+
                 if self._halted():
                     break
 
@@ -690,6 +706,8 @@ class AutomationWorker:
                             self.context
                         )
                     )
+
+                    self._emit_perf_if_due()
 
                     if self._halted():
                         break
@@ -879,6 +897,8 @@ class AutomationWorker:
                 self.exit(
                     self.context.process_id
                 )
+
+                self._emit_perf_if_due()
 
                 if self._halted():
                     break
