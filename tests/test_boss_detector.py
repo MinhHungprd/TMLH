@@ -1,3 +1,6 @@
+from pathlib import Path
+
+import cv2
 import numpy as np
 import pytest
 
@@ -33,6 +36,9 @@ def test_read_hp_keeps_injected_full_frame_capture_contract():
             (180, 320),
             dtype=np.uint8,
         ),
+        # Missing marker asset exercises the preserved immediate OCR
+        # compatibility fallback.
+        assets_dir=Path("missing-assets"),
     )
 
     context = type(
@@ -202,3 +208,100 @@ def test_default_debug_does_not_capture_full_frame(monkeypatch):
     assert detector.read_hp(context) == ""
     assert full_capture_calls == []
     assert detector.last_debug["debug_dir"] is not None
+
+
+
+def test_boss_alive_marker_match_skips_ocr():
+    from automation_constants import BOSS_ALIVE_ASSET, BOSS_ALIVE_MARKER
+
+    template = cv2.imread(
+        str(
+            Path("assets")
+            / BOSS_ALIVE_ASSET
+        ),
+        cv2.IMREAD_GRAYSCALE,
+    )
+    assert template is not None
+
+    frame = np.zeros(
+        (484, 860),
+        dtype=np.uint8,
+    )
+
+    x, y, w, h = BOSS_ALIVE_MARKER
+    frame[
+        y:y + h,
+        x:x + w,
+    ] = template
+
+    class OCR:
+        def read(self, image):
+            raise AssertionError(
+                "OCR must not run when boss marker matches"
+            )
+
+    detector = BossDetector(
+        ocr=OCR(),
+        capture=lambda hwnd: frame.copy(),
+    )
+
+    context = type(
+        "Context",
+        (),
+        {
+            "window_handle": 7,
+            "profile_id": "p1",
+        },
+    )()
+
+    assert detector.read_hp(context) == ""
+    assert detector.last_debug["chosen"] == "asset"
+    assert detector.last_debug["asset_alive"] is True
+    assert detector.last_debug["asset_score"] >= 0.82
+    assert detector.last_debug["asset_miss_streak"] == 0
+
+
+def test_boss_marker_must_miss_three_scans_before_ocr_fallback():
+    calls = []
+
+    class OCR:
+        def read(self, image):
+            calls.append(
+                image.shape
+            )
+            return "HP 128"
+
+    detector = BossDetector(
+        ocr=OCR(),
+        capture=lambda hwnd: np.zeros(
+            (484, 860),
+            dtype=np.uint8,
+        ),
+    )
+
+    context = type(
+        "Context",
+        (),
+        {
+            "window_handle": 7,
+            "profile_id": "p1",
+        },
+    )()
+
+    # First two consecutive marker misses stay entirely in the cheap path.
+    assert detector.read_hp(context) == ""
+    assert detector.last_debug["chosen"] == "asset_miss"
+    assert detector.last_debug["asset_miss_streak"] == 1
+    assert calls == []
+
+    assert detector.read_hp(context) == ""
+    assert detector.last_debug["chosen"] == "asset_miss"
+    assert detector.last_debug["asset_miss_streak"] == 2
+    assert calls == []
+
+    # Third consecutive miss enables the existing OCR safety fallback.
+    assert detector.read_hp(context) == "HP 128"
+    assert calls == [
+        (88, 264),
+    ]
+    assert detector.last_debug["asset_miss_streak"] == 0
