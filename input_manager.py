@@ -159,6 +159,33 @@ class InputManager:
                 text
             )
 
+            # Replace any remembered/autofilled field content.
+            win32api.keybd_event(
+                win32con.VK_CONTROL,
+                0,
+                0,
+                0,
+            )
+            win32api.keybd_event(
+                ord("A"),
+                0,
+                0,
+                0,
+            )
+            win32api.keybd_event(
+                ord("A"),
+                0,
+                win32con.KEYEVENTF_KEYUP,
+                0,
+            )
+            win32api.keybd_event(
+                win32con.VK_CONTROL,
+                0,
+                win32con.KEYEVENTF_KEYUP,
+                0,
+            )
+            time.sleep(0.03)
+
             win32api.keybd_event(
                 win32con.VK_CONTROL,
                 0,
