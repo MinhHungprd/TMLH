@@ -15,6 +15,7 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
+from account_import_dialog import AccountImportDialog
 from app_settings import AppSettings, AppSettingsStorage
 from auto_login import AutoLoginRunner
 from automation_constants import RESOLUTIONS
@@ -133,6 +134,26 @@ class ProfileController:
             profile = self.manager.prepare_profile(name, Path(source_path), self.profiles)
             self.profiles.append(profile)
             self.profile_store.save(self.profiles)
+        return profile
+
+    def prepare_account(
+        self,
+        username,
+        server,
+        source_path,
+    ):
+        with self._storage_lock:
+            profile = self.manager.prepare_profile(
+                username,
+                Path(source_path),
+                self.profiles,
+                account_username=username,
+                server=server,
+            )
+            self.profiles.append(profile)
+            self.profile_store.save(
+                self.profiles
+            )
         return profile
 
     def confirm_login(self, profile_id):
@@ -354,17 +375,41 @@ class LauncherApp(ctk.CTk):
             value=SERVER_LABELS["van_lang"]
         )
         self.sort_mode = tk.StringVar(value="A→Z")
+        self.search_text = tk.StringVar()
+        self.batch_size = tk.StringVar(
+            value="480x270"
+        )
+        self.batch_boss = tk.StringVar(
+            value=BOSS_LABELS.get(
+                "trom_cho",
+                "Trộm chó",
+            )
+        )
+        self.layout_mode_var = tk.StringVar(
+            value=(
+                "Chồng"
+                if settings.window_layout_mode
+                == "stack"
+                else "Xếp"
+            )
+        )
 
         self.statuses = {}
         self.checked = set()
         self.creation_events = {}
         self.profile_rows = {}
         self.selected_profile_id = None
-        self.window_layout_mode = "arrange"
+        self.window_layout_mode = (
+            settings.window_layout_mode
+        )
         self._last_layout_signature = None
         self._suspend_keep_above = False
         self._auto_login_active = set()
         self._login_fields_profile_id = None
+        self._login_contexts = {}
+        self._login_queue = []
+        self._login_queue_active = False
+        self._pending_delete_ids = ()
 
         # Worker OCR/debug logs are batched onto the Tk thread instead of
         # scheduling one GUI callback per profile per second.
@@ -373,17 +418,18 @@ class LauncherApp(ctk.CTk):
         self._log_flush_after_id = None
 
         self.title(f"{APP_NAME} - Profile Bot")
-        self.geometry("480x640")
-        self.minsize(460, 600)
+        self.geometry("640x700")
+        self.minsize(600, 640)
         self.configure(fg_color=COLORS["bg"])
         self.attributes("-topmost", True)
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(4, weight=1)
 
         self._build_header()
         self._build_source_bar()
         self._build_create_bar()
+        self._build_notice_bar()
         self._build_profile_panel()
         self._build_action_bar()
         self._build_log_panel()
