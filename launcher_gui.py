@@ -409,7 +409,9 @@ class LauncherApp(ctk.CTk):
         self.geometry("640x700")
         self.minsize(600, 640)
         self.configure(fg_color=COLORS["bg"])
-        self.attributes("-topmost", False)
+        # Keep the dashboard above TOPMOST game windows. We no longer call
+        # lift() periodically, which was the part that covered CTk dropdowns.
+        self.attributes("-topmost", True)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(4, weight=1)
