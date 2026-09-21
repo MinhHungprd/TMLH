@@ -12,6 +12,8 @@ class Profile:
     window_width: int
     window_height: int
     created_at: str
+    account_username: str = ""
+    server: str = "van_lang"
 
 
 @dataclass
