@@ -2300,8 +2300,16 @@ class LauncherApp(ctk.CTk):
                 "Đã lưu auth riêng cho profile",
             )
 
-        except (ValueError, OSError) as exc:
-            showerror("Xác nhận đăng nhập", str(exc), parent=self)
+        except (
+            ValueError,
+            OSError,
+            RuntimeError,
+        ) as exc:
+            showerror(
+                "Xác nhận đăng nhập",
+                str(exc),
+                parent=self,
+            )
 
     # ------------------------------------------------------------------
     # START / STOP
