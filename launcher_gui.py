@@ -487,6 +487,45 @@ class LauncherApp(ctk.CTk):
         except tk.TclError:
             pass
 
+    def _begin_dropdown_interaction(
+        self,
+        _event=None,
+    ):
+        """
+        CTk dropdown menus are separate native windows. Temporarily release
+        launcher TOPMOST while a dropdown is open so the launcher cannot
+        cover its own menu above TOPMOST game windows.
+        """
+        try:
+            self.attributes(
+                "-topmost",
+                False,
+            )
+        except tk.TclError:
+            pass
+
+    def _end_dropdown_interaction(
+        self,
+    ):
+        try:
+            if self.winfo_exists():
+                self.attributes(
+                    "-topmost",
+                    True,
+                )
+        except tk.TclError:
+            pass
+
+    def _bind_dropdown_safety(
+        self,
+        combo,
+    ):
+        combo.bind(
+            "<Button-1>",
+            self._begin_dropdown_interaction,
+            add="+",
+        )
+
     # ------------------------------------------------------------------
     # BUILD UI
     # ------------------------------------------------------------------
@@ -801,7 +840,16 @@ class LauncherApp(ctk.CTk):
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=11),
             dropdown_font=ctk.CTkFont(size=11),
-            command=lambda _value: self._refresh(),
+            command=lambda _value: (
+                self._refresh(),
+                self.after(
+                    80,
+                    self._end_dropdown_interaction,
+                ),
+            ),
+        )
+        self._bind_dropdown_safety(
+            self.status_filter_combo
         )
         self.status_filter_combo.grid(
             row=0,
@@ -823,7 +871,16 @@ class LauncherApp(ctk.CTk):
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=11),
             dropdown_font=ctk.CTkFont(size=11),
-            command=lambda _value: self._refresh(),
+            command=lambda _value: (
+                self._refresh(),
+                self.after(
+                    80,
+                    self._end_dropdown_interaction,
+                ),
+            ),
+        )
+        self._bind_dropdown_safety(
+            self.sort_combo
         )
         self.sort_combo.grid(
             row=0,
@@ -1015,6 +1072,16 @@ class LauncherApp(ctk.CTk):
             font=ctk.CTkFont(size=11),
             dropdown_font=ctk.CTkFont(size=11),
         )
+        self._bind_dropdown_safety(
+            self.batch_boss_combo
+        )
+        self.batch_boss_combo.configure(
+            command=lambda _value:
+            self.after(
+                80,
+                self._end_dropdown_interaction,
+            )
+        )
         self.batch_boss_combo.grid(
             row=0,
             column=1,
@@ -1050,6 +1117,16 @@ class LauncherApp(ctk.CTk):
             font=ctk.CTkFont(size=11),
             dropdown_font=ctk.CTkFont(size=11),
         )
+        self._bind_dropdown_safety(
+            self.batch_size_combo
+        )
+        self.batch_size_combo.configure(
+            command=lambda _value:
+            self.after(
+                80,
+                self._end_dropdown_interaction,
+            )
+        )
         self.batch_size_combo.grid(
             row=0,
             column=3,
@@ -1070,7 +1147,18 @@ class LauncherApp(ctk.CTk):
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=11),
             dropdown_font=ctk.CTkFont(size=11),
-            command=self._layout_mode_changed,
+            command=lambda value: (
+                self._layout_mode_changed(
+                    value
+                ),
+                self.after(
+                    80,
+                    self._end_dropdown_interaction,
+                ),
+            ),
+        )
+        self._bind_dropdown_safety(
+            self.layout_combo
         )
         self.layout_combo.grid(
             row=0,
