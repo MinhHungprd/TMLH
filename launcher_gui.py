@@ -64,6 +64,12 @@ from window_manager import (
 
 SIZES = tuple(f"{w}x{h}" for w, h in RESOLUTIONS)
 
+# Fast auth confirmation after the automated submit. Registry writes usually
+# appear quickly; poll more often and avoid keeping the UI in a pending state
+# for the previous 20 seconds.
+AUTO_LOGIN_AUTH_CONFIRM_TIMEOUT = 10.0
+AUTO_LOGIN_AUTH_CONFIRM_POLL = 0.2
+
 
 def get_app_root() -> Path:
     if getattr(sys, "frozen", False):
@@ -1833,9 +1839,13 @@ class LauncherApp(ctk.CTk):
                     # Persist the registry auth only after the automated login
                     # interaction has completed. Retry briefly because the
                     # game may write its auth values asynchronously.
+                    post_log(
+                        "Auto login: đang xác nhận auth..."
+                    )
+
                     deadline = (
                         time.monotonic()
-                        + 20.0
+                        + AUTO_LOGIN_AUTH_CONFIRM_TIMEOUT
                     )
                     last_error = None
                     updated = None
@@ -1856,7 +1866,9 @@ class LauncherApp(ctk.CTk):
                         except RuntimeError as exc:
                             last_error = exc
 
-                        if cancel.wait(0.5):
+                        if cancel.wait(
+                            AUTO_LOGIN_AUTH_CONFIRM_POLL
+                        ):
                             break
 
                     if cancel.is_set():
