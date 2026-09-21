@@ -17,9 +17,57 @@ def test_resolve_actual_game_pid_walks_descendants():
 
 def test_find_window_for_pid_filters_by_owner():
     from window_manager import find_window_for_pid
-    with patch("window_manager.win32gui.EnumWindows") as enum, patch("window_manager.win32gui.IsWindowVisible", return_value=True), patch("window_manager.win32process.GetWindowThreadProcessId", return_value=(0, 42)):
-        enum.side_effect = lambda callback, _: callback(100, None)
+
+    with patch(
+        "window_manager.win32gui.EnumWindows"
+    ) as enum, patch(
+        "window_manager.win32gui.IsWindowVisible",
+        return_value=True,
+    ), patch(
+        "window_manager.win32process.GetWindowThreadProcessId",
+        return_value=(0, 42),
+    ), patch(
+        "window_manager.win32gui.GetClientRect",
+        return_value=(0, 0, 480, 270),
+    ):
+        enum.side_effect = (
+            lambda callback, _:
+            callback(100, None)
+        )
+
         assert find_window_for_pid(42) == 100
+
+
+def test_find_window_for_pid_ignores_zero_area_and_prefers_largest():
+    from window_manager import find_window_for_pid
+
+    rects = {
+        100: (0, 0, 0, 0),
+        101: (0, 0, 320, 180),
+        102: (0, 0, 480, 270),
+    }
+
+    def enum_windows(callback, _):
+        for hwnd in rects:
+            callback(
+                hwnd,
+                None,
+            )
+
+    with patch(
+        "window_manager.win32gui.EnumWindows",
+        side_effect=enum_windows,
+    ), patch(
+        "window_manager.win32gui.IsWindowVisible",
+        return_value=True,
+    ), patch(
+        "window_manager.win32process.GetWindowThreadProcessId",
+        return_value=(0, 42),
+    ), patch(
+        "window_manager.win32gui.GetClientRect",
+        side_effect=lambda hwnd: rects[hwnd],
+    ):
+        assert find_window_for_pid(42) == 102
 
 
 def test_resolver_prefers_game_executable_inside_profile_clone():
