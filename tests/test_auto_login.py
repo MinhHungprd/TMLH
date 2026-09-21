@@ -31,6 +31,13 @@ class Detector:
         name,
     ):
         self.calls.append(name)
+
+        if name == "s2":
+            return SignalCheck(
+                False,
+                None,
+            )
+
         return SignalCheck(
             True,
             None,
@@ -123,8 +130,11 @@ def test_auto_login_scales_all_base_coordinates_to_client():
 
     assert clicked_start is True
     assert detector.calls == [
+        "s2",
         "s1",
+        "s2",
         "s1",
+        "s2",
         "s3",
     ]
 
@@ -215,4 +225,97 @@ def test_auto_login_uses_au_lac_server_coordinate():
     assert inputs.calls[1] == (
         "click",
         SERVER_POINTS["au_lac"],
+    )
+
+
+
+def test_auto_login_skips_intro_before_processing_target_signal():
+    class IntroDetector:
+        def __init__(self):
+            self.calls = 0
+
+        def check_signals(
+            self,
+            context,
+        ):
+            self.calls += 1
+
+            if self.calls == 1:
+                return [
+                    SignalCheck(
+                        True,
+                        None,
+                    ),
+                    SignalCheck(
+                        True,
+                        "CLICK_CENTER",
+                        (426, 251),
+                    ),
+                    SignalCheck(
+                        False,
+                        None,
+                    ),
+                ]
+
+            return [
+                SignalCheck(
+                    True,
+                    None,
+                ),
+                SignalCheck(
+                    False,
+                    None,
+                ),
+                SignalCheck(
+                    False,
+                    None,
+                ),
+            ]
+
+    detector = IntroDetector()
+    inputs = Input()
+    logs = []
+
+    context = SimpleNamespace(
+        window_handle=10,
+        process_id=20,
+        stop_event=Event(),
+    )
+
+    runner = AutoLoginRunner(
+        detector=detector,
+        input_manager=inputs,
+        wait=lambda seconds, event: False,
+        now=iter(
+            [
+                0.0,
+                0.0,
+                0.2,
+                0.2,
+            ]
+        ).__next__,
+        on_log=logs.append,
+    )
+
+    with patch(
+        "auto_login.set_window_topmost",
+    ):
+        result = runner._wait_for_signal(
+            context,
+            "s1",
+            5.0,
+        )
+
+    assert result.detected is True
+    assert detector.calls == 2
+    assert inputs.calls == [
+        (
+            "click",
+            (426, 251),
+        )
+    ]
+    assert any(
+        "Skip"
+        in message
+        for message in logs
     )
