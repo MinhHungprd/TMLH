@@ -748,7 +748,14 @@ class LauncherApp(ctk.CTk):
             "Proxy",
             "READY",
             (
-                f"Đã lưu {len(settings.proxies)} SOCKS5 proxy"
+                (
+                    f"Đã lưu {len(settings.proxies)} SOCKS5 proxy"
+                    + (
+                        " • TEST MODE"
+                        if settings.test_mode
+                        else ""
+                    )
+                )
             ),
         )
 
@@ -758,17 +765,36 @@ class LauncherApp(ctk.CTk):
                 "Hãy chọn ProxiFyre.exe trước khi áp dụng"
             )
 
+        if settings.test_mode:
+            if not settings.proxies:
+                raise ValueError(
+                    "Test proxy cần ít nhất 1 SOCKS5 proxy"
+                )
+
+            if len(self.controller.profiles) < 2:
+                raise ValueError(
+                    "Test proxy cần ít nhất 2 profile: "
+                    "Profile 1 Direct, Profile 2 qua Proxy 1"
+                )
+
+        if not settings.proxies:
+            route_message = (
+                "Đang tắt route SOCKS5; tất cả profile sẽ Direct"
+            )
+        elif settings.test_mode:
+            route_message = (
+                "TEST MODE: Profile 1 Direct, Profile 2 -> Proxy 1, "
+                "Profile 3 -> Proxy 2; vượt số proxy dùng proxy cuối"
+            )
+        else:
+            route_message = (
+                "Route chuẩn: 1-30 Direct, 31+ qua SOCKS5 theo nhóm 30"
+            )
+
         self._log(
             "Proxy",
             "INFO",
-            (
-                (
-                    "Đang tắt route SOCKS5; tất cả profile sẽ Direct"
-                    if not settings.proxies
-                    else
-                    "Đang tạo route: 1-30 Direct, 31+ qua SOCKS5 theo nhóm 30"
-                )
-            ),
+            route_message,
         )
 
         executable = apply_proxy_routing(
