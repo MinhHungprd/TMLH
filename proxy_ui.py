@@ -268,9 +268,9 @@ class ProxySettingsDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             proxy_card,
             text=(
-                "Khi bật Test: chỉ cần 2 profile để thử route thật của game. "
-                "Sau khi test xong hãy bỏ chọn và bấm Áp dụng để quay về "
-                "1–30 Direct, 31–60 Proxy 1. "
+                "Lưu proxy không tự áp dụng. Chỉ khi bấm Áp dụng thì "
+                "ProxiFyre mới nhận route; trước đó game vẫn dùng mạng máy. "
+                "Khi bật Test: chỉ cần 2 profile để thử route thật. "
                 "Cấu hình TMLH được mã hóa bằng Windows DPAPI; "
                 "ProxiFyre vẫn lưu user/pass plaintext trong app-config.json."
             ),
