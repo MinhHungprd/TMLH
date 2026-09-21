@@ -133,34 +133,33 @@ def discover_game_remotes(
         if remote["port"] != LOGIN_PORT
     ]
 
-    gameplay.sort(
+    # Prefer a dedicated non-login socket. If a server keeps gameplay on the
+    # same connection/port used during login, fall back to the established
+    # socket(s) instead of blocking forever on a hard-coded port assumption.
+    candidates = (
+        gameplay
+        if gameplay
+        else remotes
+    )
+
+    candidates.sort(
         key=lambda remote: (
             0
             if remote["port"]
             == GAMEPLAY_PORT
-            else 1,
+            else (
+                2
+                if remote["port"]
+                == LOGIN_PORT
+                else 1
+            ),
             remote["port"],
             remote["ip"],
         )
     )
 
-    if gameplay:
-        return gameplay
-
-    if remotes:
-        candidates = ", ".join(
-            (
-                f"{remote['ip']}:"
-                f"{remote['port']}"
-            )
-            for remote in remotes
-        )
-        raise RuntimeError(
-            (
-                f"PID {process.pid} chưa có gameplay socket khả dụng. "
-                f"Socket hiện tại: {candidates}"
-            )
-        )
+    if candidates:
+        return candidates
 
     raise RuntimeError(
         (
@@ -187,10 +186,11 @@ def has_gameplay_socket(pid: int) -> bool:
     """
     Readiness check for the exact PID.
 
-    Historically this required remote port :1002. We now accept any
-    ESTABLISHED non-login socket because server/route selection can change
-    the remote gameplay port. Startup UI still has to be absent continuously
-    before AutomationWorker treats this as IN_GAME.
+    Historically this required remote port :1002. We now accept an
+    ESTABLISHED connection owned by the exact game PID after startup UI has
+    already been absent continuously. The Frida send hook later identifies
+    the actual gameplay socket from packet shape, so readiness no longer
+    hard-codes a server-specific port.
     """
     try:
         process = psutil.Process(pid)
@@ -198,10 +198,12 @@ def has_gameplay_socket(pid: int) -> bool:
             process
         )
 
-        return any(
-            remote["port"] != LOGIN_PORT
-            for remote in remotes
-        )
+        # Visual startup signals have already been absent for
+        # IN_GAME_CONFIRM_SECONDS before this function is consulted. At that
+        # point any ESTABLISHED game-PID connection is sufficient readiness;
+        # the Frida hook later identifies the actual gameplay socket from
+        # protocol-shaped traffic.
+        return bool(remotes)
 
     except psutil.NoSuchProcess:
         return False
