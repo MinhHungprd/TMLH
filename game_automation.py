@@ -797,34 +797,23 @@ class AutomationWorker:
                     )
 
                     # ==================================
-                    # OCR detector
+                    # Boss-name OCR detector
                     # ==================================
 
-                    ocr_alive = (
-                        self.boss_detector
-                        .is_alive(text)
-                    )
-
-                    # ==================================
-                    # Visual detector
-                    # ==================================
-
-                    visual_alive = bool(
+                    name_alive = bool(
                         debug.get(
-                            "visual_alive",
+                            "name_alive",
                             False,
                         )
                     )
 
-                    # ==================================
-                    # Chỉ cần một detector thấy boss
-                    # => boss sống
-                    # ==================================
+                    # Keep legacy debug fields available, but the current
+                    # boss decision is intentionally based on matching the
+                    # OCR'd name to context.selected_boss.
+                    ocr_alive = name_alive
+                    visual_alive = False
 
-                    alive = (
-                        ocr_alive
-                        or visual_alive
-                    )
+                    alive = name_alive
 
                     now = self.now()
 
@@ -924,17 +913,17 @@ class AutomationWorker:
                         self.on_log(
                             (
                                 f"text={text!r} "
-                                f"digits={digits!r} "
                                 f"ocr_alive={ocr_alive} "
-                                f"asset_alive="
-                                f"{debug.get('asset_alive')} "
-                                f"asset_score="
-                                f"{debug.get('asset_score')} "
-                                f"asset_miss_streak="
-                                f"{debug.get('asset_miss_streak')} "
-                                f"visual_glyphs="
-                                f"{debug.get('visual_glyphs')} "
-                                f"visual_alive={visual_alive} "
+                                f"name_norm="
+                                f"{debug.get('name_normalized')!r} "
+                                f"name_expected="
+                                f"{debug.get('name_expected')!r} "
+                                f"name_ratio="
+                                f"{debug.get('name_ratio')} "
+                                f"name_coverage="
+                                f"{debug.get('name_coverage')} "
+                                f"cache_hit="
+                                f"{debug.get('cache_hit')} "
                                 f"final_alive={alive} "
                                 f"dead_streak="
                                 f"{self.context.boss_dead_streak} "
