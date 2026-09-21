@@ -21,6 +21,8 @@ import time
 import frida
 import psutil
 
+from perf_metrics import perf_timer
+
 
 GAMEPLAY_PORT = 1002
 LOGIN_PORT = 8001
@@ -168,6 +170,16 @@ def has_gameplay_socket(pid: int) -> bool:
     return False
 # ---------- Gửi ----------
 def send_packet(pid: int, packet: str, wait: float, stop_event=None) -> int:
+    with perf_timer("frida_ms"):
+        return _send_packet_impl(
+            pid,
+            packet,
+            wait,
+            stop_event,
+        )
+
+
+def _send_packet_impl(pid: int, packet: str, wait: float, stop_event=None) -> int:
     if stop_event is not None and stop_event.is_set():
         raise RuntimeError("Boss command cancelled")
 
