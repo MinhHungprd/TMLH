@@ -20,6 +20,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
+import struct
+import time
 import subprocess
 import tempfile
 
@@ -50,6 +53,21 @@ class Socks5Proxy:
 
 
 @dataclass(frozen=True)
+class ProxyTestResult:
+    endpoint: str
+    ok: bool
+    latency_ms: float | None
+    detail: str
+
+
+@dataclass(frozen=True)
+class ProxyVerification:
+    config_applied: bool
+    test_mode: bool
+    proxy_results: tuple[ProxyTestResult, ...]
+
+
+@dataclass(frozen=True)
 class ProxySettings:
     proxifyre_path: str = ""
     proxies: tuple[Socks5Proxy, ...] = ()
@@ -57,6 +75,246 @@ class ProxySettings:
     # profile 1 stays Direct, profile 2 uses proxy 1, profile 3 uses proxy 2,
     # and any remaining profiles reuse the last configured proxy.
     test_mode: bool = False
+
+
+def _recv_exact(
+    sock: socket.socket,
+    size: int,
+) -> bytes:
+    chunks = bytearray()
+
+    while len(chunks) < size:
+        chunk = sock.recv(
+            size - len(chunks)
+        )
+
+        if not chunk:
+            raise ConnectionError(
+                "SOCKS5 đóng kết nối sớm"
+            )
+
+        chunks.extend(chunk)
+
+    return bytes(chunks)
+
+
+def test_socks5_proxy(
+    proxy: Socks5Proxy,
+    *,
+    timeout: float = 5.0,
+    target_host: str = "1.1.1.1",
+    target_port: int = 443,
+) -> ProxyTestResult:
+    """
+    Validate the configured SOCKS5 endpoint itself.
+
+    This proves TCP reachability, SOCKS5 negotiation/authentication and a
+    CONNECT request through the proxy. It does not by itself prove that an
+    already-open game socket has been intercepted by ProxiFyre.
+    """
+    started = time.perf_counter()
+
+    try:
+        username = proxy.username.encode(
+            "utf-8"
+        )
+        password = proxy.password.encode(
+            "utf-8"
+        )
+
+        if len(username) > 255:
+            raise ValueError(
+                "username SOCKS5 dài quá 255 byte"
+            )
+
+        if len(password) > 255:
+            raise ValueError(
+                "password SOCKS5 dài quá 255 byte"
+            )
+
+        with socket.create_connection(
+            (
+                proxy.host,
+                proxy.port,
+            ),
+            timeout=timeout,
+        ) as sock:
+            sock.settimeout(timeout)
+
+            # Offer both no-auth and username/password. Providers that require
+            # credentials normally choose method 0x02.
+            sock.sendall(
+                b"\x05\x02\x00\x02"
+            )
+
+            version, method = _recv_exact(
+                sock,
+                2,
+            )
+
+            if version != 5:
+                raise ConnectionError(
+                    "Phản hồi không phải SOCKS5"
+                )
+
+            if method == 0xFF:
+                raise PermissionError(
+                    "SOCKS5 từ chối phương thức xác thực"
+                )
+
+            if method == 0x02:
+                auth = (
+                    b"\x01"
+                    + bytes(
+                        [len(username)]
+                    )
+                    + username
+                    + bytes(
+                        [len(password)]
+                    )
+                    + password
+                )
+                sock.sendall(auth)
+
+                auth_version, status = (
+                    _recv_exact(
+                        sock,
+                        2,
+                    )
+                )
+
+                if (
+                    auth_version != 1
+                    or status != 0
+                ):
+                    raise PermissionError(
+                        "Sai username/password SOCKS5"
+                    )
+            elif method != 0x00:
+                raise ConnectionError(
+                    f"SOCKS5 chọn auth method không hỗ trợ: {method}"
+                )
+
+            try:
+                packed_host = socket.inet_aton(
+                    target_host
+                )
+                address = (
+                    b"\x01"
+                    + packed_host
+                )
+            except OSError:
+                host_bytes = target_host.encode(
+                    "idna"
+                )
+
+                if len(host_bytes) > 255:
+                    raise ValueError(
+                        "Target host quá dài"
+                    )
+
+                address = (
+                    b"\x03"
+                    + bytes(
+                        [len(host_bytes)]
+                    )
+                    + host_bytes
+                )
+
+            request = (
+                b"\x05\x01\x00"
+                + address
+                + struct.pack(
+                    "!H",
+                    target_port,
+                )
+            )
+            sock.sendall(request)
+
+            version, reply, _reserved, atyp = (
+                _recv_exact(
+                    sock,
+                    4,
+                )
+            )
+
+            if version != 5:
+                raise ConnectionError(
+                    "SOCKS5 CONNECT trả sai version"
+                )
+
+            if reply != 0:
+                messages = {
+                    1: "general failure",
+                    2: "connection not allowed",
+                    3: "network unreachable",
+                    4: "host unreachable",
+                    5: "connection refused",
+                    6: "TTL expired",
+                    7: "command not supported",
+                    8: "address type not supported",
+                }
+                raise ConnectionError(
+                    "SOCKS5 CONNECT lỗi "
+                    f"{reply}: "
+                    f"{messages.get(reply, 'unknown')}"
+                )
+
+            if atyp == 0x01:
+                _recv_exact(
+                    sock,
+                    4,
+                )
+            elif atyp == 0x04:
+                _recv_exact(
+                    sock,
+                    16,
+                )
+            elif atyp == 0x03:
+                length = _recv_exact(
+                    sock,
+                    1,
+                )[0]
+                _recv_exact(
+                    sock,
+                    length,
+                )
+            else:
+                raise ConnectionError(
+                    "SOCKS5 trả address type không hợp lệ"
+                )
+
+            _recv_exact(
+                sock,
+                2,
+            )
+
+        latency_ms = (
+            time.perf_counter()
+            - started
+        ) * 1000.0
+
+        return ProxyTestResult(
+            endpoint=proxy.endpoint,
+            ok=True,
+            latency_ms=latency_ms,
+            detail=(
+                "SOCKS5 auth + CONNECT OK"
+            ),
+        )
+
+    except Exception as exc:
+        latency_ms = (
+            time.perf_counter()
+            - started
+        ) * 1000.0
+
+        return ProxyTestResult(
+            endpoint=proxy.endpoint,
+            ok=False,
+            latency_ms=latency_ms,
+            detail=str(exc),
+        )
 
 
 def parse_proxy_line(value: str) -> Socks5Proxy:
@@ -596,6 +854,64 @@ def apply_proxy_routing(
 
     return executable
 
+
+
+def verify_proxy_setup(
+    profiles,
+    settings: ProxySettings,
+    *,
+    config_wait_seconds: float = 8.0,
+    proxy_timeout: float = 5.0,
+) -> ProxyVerification:
+    """
+    Check two separate things:
+    1) ProxiFyre app-config.json matches the current profile routing policy.
+    2) Every configured SOCKS5 endpoint accepts auth + CONNECT.
+
+    The config wait makes this usable immediately after an elevated Apply,
+    whose PowerShell/UAC restart runs asynchronously.
+    """
+    deadline = (
+        time.monotonic()
+        + max(
+            0.0,
+            float(config_wait_seconds),
+        )
+    )
+
+    config_applied = False
+
+    while True:
+        config_applied = (
+            routing_config_matches(
+                profiles,
+                settings,
+            )
+        )
+
+        if config_applied:
+            break
+
+        if time.monotonic() >= deadline:
+            break
+
+        time.sleep(0.25)
+
+    results = tuple(
+        test_socks5_proxy(
+            proxy,
+            timeout=proxy_timeout,
+        )
+        for proxy in settings.proxies
+    )
+
+    return ProxyVerification(
+        config_applied=config_applied,
+        test_mode=bool(
+            settings.test_mode
+        ),
+        proxy_results=results,
+    )
 
 
 def routing_config_matches(
