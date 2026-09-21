@@ -83,12 +83,13 @@ def _capture_rect_pil(
 
 def capture_client(hwnd: int) -> np.ndarray:
     """
-    Capture one client frame on demand through the shared MSS broker.
+    Capture the full client only for startup/respawn asset detection.
 
-    Startup/respawn asset scans use the same single capture worker as boss
-    scans, eliminating concurrent screen-grab bursts. PIL remains a safe,
-    fully serialized fallback.
+    Keep this path on the previously proven PIL/ImageGrab backend. It is
+    serialized, and startup polling is already relaxed, so it cannot create a
+    burst of concurrent GDI captures. Boss ROI scans continue to use MSS.
     """
+    from PIL import ImageGrab
     import win32gui
 
     with perf_timer("capture_ms"):
@@ -100,22 +101,32 @@ def capture_client(hwnd: int) -> np.ndarray:
             hwnd
         )
 
-        try:
-            return SCREEN_CAPTURE_BROKER.capture_rect(
+        if width <= 0 or height <= 0:
+            raise RuntimeError(
+                f"Game client is not drawable yet: {width}x{height}"
+            )
+
+        with _SCREEN_CAPTURE_SEMAPHORE:
+            image = ImageGrab.grab(
                 (
                     left,
                     top,
-                    width,
-                    height,
+                    left + width,
+                    top + height,
                 )
             )
-        except Exception:
-            return _capture_rect_pil(
-                left,
-                top,
-                width,
-                height,
+
+        frame = np.array(image)
+
+        if frame.size == 0:
+            raise RuntimeError(
+                "Game client screenshot is empty"
             )
+
+        return cv2.cvtColor(
+            frame,
+            cv2.COLOR_RGB2GRAY,
+        )
 
 
 def _capture_client_roi_pil(
