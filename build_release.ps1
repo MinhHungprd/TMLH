@@ -139,7 +139,8 @@ $ExcludeFiles = @(
     "*.log",
     "*.tmp",
     "*.temp",
-    ".tmlh_profile_auth.bin"
+    ".tmlh_profile_auth.bin",
+    ".tmlh_login_credentials.bin"
 )
 
 $RoboArgs = @(
