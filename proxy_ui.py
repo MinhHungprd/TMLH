@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 import customtkinter as ctk
 
 from proxy_manager import (
     ProxySettings,
     parse_proxy_lines,
+)
+from ui_dialogs import (
+    keep_above_game,
+    showerror,
+    showinfo,
+    showwarning,
 )
 from ui_theme import COLORS
 
@@ -23,20 +30,23 @@ class ProxySettingsDialog(ctk.CTkToplevel):
         *,
         on_save,
         on_apply,
+        on_verify,
     ):
         super().__init__(master)
 
         self.on_save = on_save
         self.on_apply = on_apply
+        self.on_verify = on_verify
 
         self.title("SOCKS5 Proxy")
-        self.geometry("520x470")
-        self.minsize(500, 450)
+        self.geometry("540x520")
+        self.minsize(520, 500)
         self.configure(
             fg_color=COLORS["bg"],
         )
         self.transient(master)
         self.grab_set()
+        keep_above_game(self)
 
         self.path_var = tk.StringVar(
             value=settings.proxifyre_path
@@ -259,12 +269,35 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             ),
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=8),
-            wraplength=460,
+            wraplength=490,
             justify="left",
         ).grid(
             row=3,
             column=0,
             sticky="w",
+            padx=10,
+            pady=(0, 6),
+        )
+
+        self.verify_status = ctk.CTkLabel(
+            proxy_card,
+            text=(
+                "Chưa kiểm tra • bấm Kiểm tra để xác thực SOCKS5 "
+                "và app-config ProxiFyre."
+            ),
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(
+                size=9,
+                weight="bold",
+            ),
+            wraplength=490,
+            justify="left",
+            anchor="w",
+        )
+        self.verify_status.grid(
+            row=4,
+            column=0,
+            sticky="ew",
             padx=10,
             pady=(0, 9),
         )
@@ -320,7 +353,22 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             padx=(0, 7),
         )
 
+        self.verify_button = ctk.CTkButton(
+            actions,
+            text="✓ Kiểm tra",
+            width=100,
+            height=30,
+            fg_color=COLORS["green"],
+            hover_color=COLORS["green_hover"],
+            text_color=COLORS["black"],
+            command=self._verify,
+        )
+        self.verify_button.pack(
+            side="left",
+        )
+
     def _browse(self):
+        keep_above_game(self)
         selected = filedialog.askopenfilename(
             parent=self,
             title="Chọn ProxiFyre.exe",
@@ -354,7 +402,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
         try:
             settings = self._settings()
             self.on_save(settings)
-            messagebox.showinfo(
+            showinfo(
                 "Proxy",
                 (
                     f"Đã lưu {len(settings.proxies)} proxy.\n"
@@ -368,11 +416,201 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             OSError,
             RuntimeError,
         ) as exc:
-            messagebox.showerror(
+            showerror(
                 "Proxy",
                 str(exc),
                 parent=self,
             )
+
+    def _verify(self):
+        try:
+            settings = self._settings()
+
+            if not settings.proxies:
+                raise ValueError(
+                    "Chưa có SOCKS5 proxy để kiểm tra"
+                )
+
+            self.verify_button.configure(
+                state="disabled",
+                text="Đang kiểm tra...",
+            )
+            self.verify_status.configure(
+                text=(
+                    "Đang kiểm tra SOCKS5 auth/CONNECT "
+                    "và app-config ProxiFyre..."
+                ),
+                text_color=COLORS["amber"],
+            )
+
+            threading.Thread(
+                target=self._verify_worker,
+                args=(settings,),
+                name="proxy-verification",
+                daemon=True,
+            ).start()
+
+        except (
+            ValueError,
+            OSError,
+            RuntimeError,
+        ) as exc:
+            showerror(
+                "Kiểm tra proxy",
+                str(exc),
+                parent=self,
+            )
+
+    def _verify_worker(
+        self,
+        settings,
+    ):
+        try:
+            result = self.on_verify(
+                settings
+            )
+            self.after(
+                0,
+                lambda: self._show_verification(
+                    result
+                ),
+            )
+        except Exception as exc:
+            self.after(
+                0,
+                lambda exc=exc:
+                self._show_verify_error(
+                    exc
+                ),
+            )
+
+    def _show_verification(
+        self,
+        result,
+    ):
+        self.verify_button.configure(
+            state="normal",
+            text="✓ Kiểm tra",
+        )
+
+        mode = (
+            "TEST MODE"
+            if result.test_mode
+            else "BÌNH THƯỜNG"
+        )
+        config_text = (
+            "ProxiFyre config: OK"
+            if result.config_applied
+            else "ProxiFyre config: CHƯA KHỚP"
+        )
+
+        proxy_lines = []
+
+        for index, item in enumerate(
+            result.proxy_results,
+            start=1,
+        ):
+            if item.ok:
+                proxy_lines.append(
+                    (
+                        f"Proxy {index}: OK "
+                        f"({item.latency_ms:.0f} ms)"
+                    )
+                )
+            else:
+                proxy_lines.append(
+                    (
+                        f"Proxy {index}: LỖI — "
+                        f"{item.detail}"
+                    )
+                )
+
+        all_proxy_ok = (
+            bool(result.proxy_results)
+            and all(
+                item.ok
+                for item in result.proxy_results
+            )
+        )
+        fully_ok = (
+            result.config_applied
+            and all_proxy_ok
+        )
+
+        summary = (
+            f"{mode} • {config_text}"
+            + (
+                " • "
+                + " | ".join(
+                    proxy_lines
+                )
+                if proxy_lines
+                else ""
+            )
+        )
+
+        self.verify_status.configure(
+            text=summary,
+            text_color=(
+                COLORS["green"]
+                if fully_ok
+                else (
+                    COLORS["amber"]
+                    if all_proxy_ok
+                    else COLORS["red"]
+                )
+            ),
+        )
+
+        keep_above_game(self)
+
+        if fully_ok:
+            showinfo(
+                "Proxy OK",
+                (
+                    "SOCKS5 auth + CONNECT thành công và app-config "
+                    "ProxiFyre đang khớp với route hiện tại.\n\n"
+                    "Nếu vừa đổi route, hãy restart tab game để socket "
+                    "mới dùng cấu hình vừa áp dụng."
+                ),
+                parent=self,
+            )
+        elif all_proxy_ok:
+            showwarning(
+                "Proxy dùng được nhưng chưa áp dụng",
+                (
+                    "SOCKS5 kết nối thành công nhưng app-config "
+                    "ProxiFyre chưa khớp. Bấm Áp dụng, cho phép UAC "
+                    "nếu có, rồi Kiểm tra lại."
+                ),
+                parent=self,
+            )
+        else:
+            showerror(
+                "Proxy lỗi",
+                "\n".join(
+                    proxy_lines
+                ),
+                parent=self,
+            )
+
+    def _show_verify_error(
+        self,
+        exc,
+    ):
+        self.verify_button.configure(
+            state="normal",
+            text="✓ Kiểm tra",
+        )
+        self.verify_status.configure(
+            text=f"Kiểm tra lỗi: {exc}",
+            text_color=COLORS["red"],
+        )
+        showerror(
+            "Kiểm tra proxy",
+            str(exc),
+            parent=self,
+        )
 
     def _apply(self):
         try:
@@ -380,7 +618,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             self.on_save(settings)
             self.on_apply(settings)
 
-            messagebox.showinfo(
+            showinfo(
                 "Proxy",
                 (
                     (
@@ -396,12 +634,17 @@ class ProxySettingsDialog(ctk.CTkToplevel):
                 ),
                 parent=self,
             )
+
+            self.after(
+                300,
+                self._verify,
+            )
         except (
             ValueError,
             OSError,
             RuntimeError,
         ) as exc:
-            messagebox.showerror(
+            showerror(
                 "Proxy",
                 str(exc),
                 parent=self,
