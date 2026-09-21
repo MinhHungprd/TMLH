@@ -98,8 +98,7 @@ class AccountImportDialog(ctk.CTkToplevel):
         )
         self.input_box.insert(
             "1.0",
-            "acc001 | password001 | 1\n"
-            "acc002 | password002 | 2",
+            "",
         )
 
         status_card = ctk.CTkFrame(
