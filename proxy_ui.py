@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import queue
 import threading
 import tkinter as tk
 from tkinter import filedialog
@@ -47,6 +48,12 @@ class ProxySettingsDialog(ctk.CTkToplevel):
         self.transient(master)
         self.grab_set()
         keep_above_game(self)
+
+        self._verify_queue = queue.SimpleQueue()
+        self._verify_poll_after_id = self.after(
+            100,
+            self._poll_verify_queue,
+        )
 
         self.path_var = tk.StringVar(
             value=settings.proxifyre_path
@@ -469,20 +476,49 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             result = self.on_verify(
                 settings
             )
-            self.after(
-                0,
-                lambda: self._show_verification(
-                    result
-                ),
+            self._verify_queue.put(
+                (
+                    "result",
+                    result,
+                )
             )
         except Exception as exc:
-            self.after(
-                0,
-                lambda exc=exc:
-                self._show_verify_error(
-                    exc
-                ),
+            self._verify_queue.put(
+                (
+                    "error",
+                    exc,
+                )
             )
+
+    def _poll_verify_queue(self):
+        try:
+            while True:
+                kind, payload = (
+                    self._verify_queue
+                    .get_nowait()
+                )
+
+                if kind == "result":
+                    self._show_verification(
+                        payload
+                    )
+                else:
+                    self._show_verify_error(
+                        payload
+                    )
+        except queue.Empty:
+            pass
+
+        try:
+            if self.winfo_exists():
+                self._verify_poll_after_id = (
+                    self.after(
+                        100,
+                        self._poll_verify_queue,
+                    )
+                )
+        except tk.TclError:
+            pass
 
     def _show_verification(
         self,
