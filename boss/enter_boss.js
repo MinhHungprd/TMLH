@@ -1,8 +1,6 @@
 "use strict";
 
 const TARGETS = __TARGETS__;
-const LOGIN_PORT = 8001;
-
 const winsock = Process.getModuleByName("ws2_32.dll");
 const sendAddress = winsock.getExportByName("send");
 const sendSocket = new NativeFunction(
@@ -50,7 +48,7 @@ function peer(socket) {
 }
 
 function isCandidate(remote) {
-    if (remote === null || remote.port === LOGIN_PORT) {
+    if (remote === null) {
         return false;
     }
 
