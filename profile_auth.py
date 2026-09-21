@@ -108,6 +108,57 @@ def _read_current_auth_values() -> list[dict]:
     return values
 
 
+def clear_current_auth_values() -> None:
+    """
+    Remove only TMLH auth values from the shared HKCU registry.
+
+    Automatic login uses this before typing a new account so a stale account
+    from another profile cannot be mistaken for a successful fresh login.
+    """
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            REGISTRY_PATH,
+            0,
+            winreg.KEY_READ
+            | winreg.KEY_WRITE,
+        )
+    except FileNotFoundError:
+        return
+
+    try:
+        names = []
+        index = 0
+
+        while True:
+            try:
+                name, _value, _type = (
+                    winreg.EnumValue(
+                        key,
+                        index,
+                    )
+                )
+            except OSError:
+                break
+
+            names.append(name)
+            index += 1
+
+        for name in names:
+            if not _is_auth_value(name):
+                continue
+
+            try:
+                winreg.DeleteValue(
+                    key,
+                    name,
+                )
+            except FileNotFoundError:
+                pass
+    finally:
+        winreg.CloseKey(key)
+
+
 def save_profile_auth(game_path: str | Path) -> Path:
     values = _read_current_auth_values()
 
