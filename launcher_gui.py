@@ -421,7 +421,7 @@ class LauncherApp(ctk.CTk):
         self.geometry("640x700")
         self.minsize(600, 640)
         self.configure(fg_color=COLORS["bg"])
-        self.attributes("-topmost", True)
+        self.attributes("-topmost", False)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(4, weight=1)
@@ -1115,10 +1115,9 @@ class LauncherApp(ctk.CTk):
                 self.proxy_settings_store.load()
             )
         except RuntimeError as exc:
-            showerror(
-                "Proxy",
-                str(exc),
-                parent=self,
+            self._notify(
+                f"Proxy: {exc}",
+                "error",
             )
             return
 
@@ -2692,17 +2691,62 @@ class LauncherApp(ctk.CTk):
     # WINDOW LAYOUT
     # ------------------------------------------------------------------
 
+    def _layout_mode_changed(
+        self,
+        value,
+    ):
+        self.window_layout_mode = (
+            "stack"
+            if value == "Chồng"
+            else "arrange"
+        )
+        self.controller.settings_store.save(
+            AppSettings(
+                self.source.get().strip(),
+                self.window_layout_mode,
+            )
+        )
+        self._apply_window_layout()
+        self._notify(
+            (
+                "Bố cục mặc định: "
+                + (
+                    "Chồng"
+                    if self.window_layout_mode
+                    == "stack"
+                    else "Xếp"
+                )
+            ),
+            "success",
+        )
+
     def _window_items(self, include_reveal=False):
         import win32gui
 
         items = []
 
-        for worker in self.controller.workers.values():
-            context = worker.context
+        contexts = [
+            worker.context
+            for worker
+            in self.controller.workers.values()
+        ]
+        contexts.extend(
+            self._login_contexts.values()
+        )
+
+        seen_hwnds = set()
+
+        for context in contexts:
             hwnd = context.window_handle
 
-            if not hwnd or not win32gui.IsWindow(hwnd):
+            if (
+                not hwnd
+                or hwnd in seen_hwnds
+                or not win32gui.IsWindow(hwnd)
+            ):
                 continue
+
+            seen_hwnds.add(hwnd)
 
             left, top, right, bottom = (
                 win32gui.GetWindowRect(hwnd)
@@ -2779,6 +2823,15 @@ class LauncherApp(ctk.CTk):
     def _arrange_windows(self, remember=True):
         if remember:
             self.window_layout_mode = "arrange"
+            self.layout_mode_var.set(
+                "Xếp"
+            )
+            self.controller.settings_store.save(
+                AppSettings(
+                    self.source.get().strip(),
+                    self.window_layout_mode,
+                )
+            )
 
         clear_boss_stack_order()
 
@@ -2835,6 +2888,15 @@ class LauncherApp(ctk.CTk):
     def _stack_windows(self, remember=True):
         if remember:
             self.window_layout_mode = "stack"
+            self.layout_mode_var.set(
+                "Chồng"
+            )
+            self.controller.settings_store.save(
+                AppSettings(
+                    self.source.get().strip(),
+                    self.window_layout_mode,
+                )
+            )
 
         items = self._window_items(
             include_reveal=True,
