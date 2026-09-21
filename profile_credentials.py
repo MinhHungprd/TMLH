@@ -15,6 +15,13 @@ LOGIN_CREDENTIALS_FILENAME = ".tmlh_login_credentials.bin"
 SERVER_LABELS = {
     "van_lang": "Văn Lang",
     "au_lac": "Âu Lạc",
+    "server_3": "Server 3",
+}
+
+SERVER_NUMBERS = {
+    "1": "van_lang",
+    "2": "au_lac",
+    "3": "server_3",
 }
 
 SERVER_KEYS = {
