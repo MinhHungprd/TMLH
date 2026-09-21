@@ -13,8 +13,59 @@ from automation_constants import BASE_HEIGHT, BOSS_HP
 PROFILE_LAUNCH_LOCK = threading.Lock()
 
 _STACK_ORDER_LOCK = threading.RLock()
-_NON_BOSS_VISIBILITY_LOCK = threading.Lock()
 _BOSS_STACK_ORDER = ()
+
+
+class _ScreenVisibilityGate:
+    """Many boss readers may capture together; asset raise is exclusive."""
+
+    def __init__(self):
+        self._condition = threading.Condition()
+        self._readers = 0
+        self._writer = False
+        self._waiting_writers = 0
+
+    @contextmanager
+    def shared(self):
+        with self._condition:
+            while (
+                self._writer
+                or self._waiting_writers > 0
+            ):
+                self._condition.wait()
+            self._readers += 1
+
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._readers -= 1
+                if self._readers == 0:
+                    self._condition.notify_all()
+
+    @contextmanager
+    def exclusive(self):
+        with self._condition:
+            self._waiting_writers += 1
+            try:
+                while (
+                    self._writer
+                    or self._readers > 0
+                ):
+                    self._condition.wait()
+                self._writer = True
+            finally:
+                self._waiting_writers -= 1
+
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._writer = False
+                self._condition.notify_all()
+
+
+_SCREEN_VISIBILITY_GATE = _ScreenVisibilityGate()
 
 def launch_profile(profile):
     path = Path(profile.game_path)
@@ -173,6 +224,13 @@ def _restore_stacked_window(hwnd: int, order) -> None:
 
 
 @contextmanager
+def boss_capture_visibility():
+    """Allow concurrent boss captures unless an asset window is raised."""
+    with _SCREEN_VISIBILITY_GATE.shared():
+        yield
+
+
+@contextmanager
 def non_boss_window_visible(hwnd: int):
     """
     In overlap mode only, temporarily raise the target window for startup
@@ -188,7 +246,7 @@ def non_boss_window_visible(hwnd: int):
         yield
         return
 
-    with _NON_BOSS_VISIBILITY_LOCK:
+    with _SCREEN_VISIBILITY_GATE.exclusive():
         if not win32gui.IsWindow(hwnd):
             yield
             return
