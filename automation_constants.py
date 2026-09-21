@@ -14,6 +14,19 @@ SIGNAL_2 = (742, 437, 45, 24)
 SIGNAL_3 = (392, 389, 75, 35)
 BOSS_HP = (375, 8, 66, 22)
 
+# Boss-name OCR box in canonical 860x484 coordinates.
+BOSS_NAME_ROI = (361, 27, 91, 18)
+BOSS_NAME_LABELS = {
+    "trom_cho": "Trộm chó",
+    "ngao_op": "Ngáo ộp",
+    "dai_tho_san": "Đại thợ săn",
+}
+# Fuzzy matching tolerates missing/misread OCR characters while still
+# requiring the selected boss to be the best matching known name.
+BOSS_NAME_MATCH_RATIO = 0.62
+BOSS_NAME_MATCH_COVERAGE = 0.55
+BOSS_NAME_MIN_CHARS = 4
+
 # Lightweight boss-alive marker added from the captured asset:
 # assets/asset__x443_y27_w12_h18.png
 BOSS_ALIVE_MARKER = (443, 27, 12, 18)
