@@ -573,7 +573,7 @@ class LauncherApp(ctk.CTk):
             card,
             text="● Chưa",
             text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=8, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
             width=50,
             anchor="w",
         )
@@ -1355,7 +1355,7 @@ class LauncherApp(ctk.CTk):
             footer,
             text="◇  TMLH Bot",
             text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=8, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
         ).grid(row=0, column=0, padx=12)
 
         ctk.CTkLabel(
