@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import time
 
-from automation_constants import SIGNAL_1
+from automation_constants import SIGNAL_1, SIGNAL_3
+from boss.enter_boss import has_gameplay_socket
 from game_state import GameStateDetector
 from input_manager import InputManager
 from profile_credentials import (
@@ -16,7 +17,11 @@ from vision import (
     get_client_size,
     roi_center,
 )
-from window_manager import set_window_topmost
+from window_manager import (
+    find_window_for_pid,
+    set_profile_window_title,
+    set_window_topmost,
+)
 
 
 SERVER_MENU_POINT = (429, 354)
@@ -38,6 +43,7 @@ LOGIN_SECOND_SIGNAL_TIMEOUT = 25.0
 # After submit, the Start button normally appears quickly. Keep this optional
 # window short so a missing S3 does not delay auth confirmation for 12s.
 LOGIN_START_OPTIONAL_TIMEOUT = 4.0
+LOGIN_GAMEPLAY_READY_TIMEOUT = 25.0
 LOGIN_SCAN_INTERVAL = 0.35
 LOGIN_POST_SUBMIT_SETTLE = 0.35
 
@@ -108,8 +114,49 @@ class AutoLoginRunner:
         self,
         context,
     ):
+        hwnd = context.window_handle
+
+        if not hwnd:
+            hwnd = None
+
+        try:
+            set_window_topmost(
+                hwnd,
+                True,
+            )
+            return
+        except Exception:
+            pass
+
+        # Unity may recreate its top-level render window during login. Rebind
+        # the runtime context to the current drawable HWND of the same PID
+        # instead of failing with ClientToScreen/invalid-handle errors.
+        replacement = find_window_for_pid(
+            context.process_id
+        )
+
+        if replacement is None:
+            raise RuntimeError(
+                "Không tìm thấy cửa sổ game hợp lệ trong lúc auto login"
+            )
+
+        context.window_handle = replacement
+
+        if getattr(
+            context,
+            "profile_name",
+            None,
+        ):
+            try:
+                set_profile_window_title(
+                    replacement,
+                    context.profile_name,
+                )
+            except Exception:
+                pass
+
         set_window_topmost(
-            context.window_handle,
+            replacement,
             True,
         )
 
@@ -485,24 +532,114 @@ class AutoLoginRunner:
             optional=True,
         )
 
-        if start is None:
-            self.on_log(
-                "Auto login: không thấy nút Bắt đầu, bỏ qua bước tùy chọn"
+        if start is not None:
+            self._click(
+                context,
+                roi_center(
+                    SIGNAL_3
+                ),
             )
-            return False
+            self.on_log(
+                "Auto login: đã bấm Bắt đầu"
+            )
+        else:
+            self.on_log(
+                "Auto login: chưa thấy nút Bắt đầu, tiếp tục chờ gameplay socket"
+            )
 
-        # S3 already reports its correctly scaled center, but using the base
-        # signal center keeps the flow deterministic across all resolutions.
-        from automation_constants import SIGNAL_3
-
-        self._click(
-            context,
-            roi_center(
-                SIGNAL_3
-            ),
+        # Do not mark/save the profile as successfully logged in until the
+        # exact game PID has opened gameplay :1002. Previously Registry auth
+        # alone could mark READY while the client was still on a login/menu
+        # screen, causing the next normal Start to hang at
+        # WAITING_GAMEPLAY_SOCKET.
+        self.on_status(
+            "LOGIN_WAITING_GAMEPLAY"
         )
         self.on_log(
-            "Auto login: đã bấm Bắt đầu"
+            "Auto login: chờ gameplay socket :1002"
         )
 
-        return True
+        deadline = (
+            self.now()
+            + LOGIN_GAMEPLAY_READY_TIMEOUT
+        )
+
+        while (
+            self.now() < deadline
+            and not context.stop_event.is_set()
+        ):
+            if has_gameplay_socket(
+                context.process_id
+            ):
+                self.on_log(
+                    "Auto login: gameplay socket :1002 đã sẵn sàng"
+                )
+                return True
+
+            self._prepare_window(
+                context
+            )
+
+            # Keep handling intro/start overlays while waiting for gameplay.
+            checks = (
+                self.detector
+                .check_signals(
+                    context
+                )
+            )
+
+            skip = checks[1]
+            start = checks[2]
+
+            if skip.detected:
+                if (
+                    skip.coordinates
+                    is not None
+                ):
+                    self.input.click_center(
+                        context.window_handle,
+                        skip.coordinates,
+                        context.stop_event,
+                        context.process_id,
+                    )
+                    self.on_log(
+                        "Auto login: phát hiện giới thiệu → Skip"
+                    )
+                    self._wait_short(
+                        context,
+                        0.35,
+                    )
+                    continue
+
+            if start.detected:
+                self._click(
+                    context,
+                    roi_center(
+                        SIGNAL_3
+                    ),
+                )
+                self.on_log(
+                    "Auto login: phát hiện nút Bắt đầu → bấm"
+                )
+                self._wait_short(
+                    context,
+                    0.35,
+                )
+                continue
+
+            self._wait_short(
+                context,
+                LOGIN_SCAN_INTERVAL,
+            )
+
+        if context.stop_event.is_set():
+            raise InterruptedError(
+                "Đã dừng auto login"
+            )
+
+        raise TimeoutError(
+            (
+                "Đăng nhập chưa hoàn tất: không thấy gameplay socket "
+                f":1002 trong {LOGIN_GAMEPLAY_READY_TIMEOUT:.0f}s"
+            )
+        )
