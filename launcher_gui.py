@@ -1374,28 +1374,74 @@ class LauncherApp(ctk.CTk):
         ).grid(row=0, column=2, padx=12)
 
     # ------------------------------------------------------------------
-    # PROFILE LIST / CRUD
+    # ACCOUNT LIST / BATCH WORKFLOW
     # ------------------------------------------------------------------
 
     def _runtime_status(self, profile):
-        runtime = self.statuses.get(profile.profile_id)
+        runtime = self.statuses.get(
+            profile.profile_id
+        )
         if runtime:
             return runtime
 
         try:
-            self.controller.manager.check_clone(profile)
-            return "Ready" if profile.login_ready else "Chưa đăng nhập"
+            self.controller.manager.check_clone(
+                profile
+            )
+            return (
+                "Ready"
+                if profile.login_ready
+                else "Chưa đăng nhập"
+            )
         except MissingGameFilesError:
             return "Error / Missing Files"
 
+    @staticmethod
+    def _account_name(profile):
+        return (
+            getattr(
+                profile,
+                "account_username",
+                "",
+            ).strip()
+            or profile.profile_name
+        )
+
     def _sorted_profiles(self):
-        profiles = list(self.controller.profiles)
+        profiles = list(
+            self.controller.profiles
+        )
+        query = (
+            self.search_text.get()
+            .strip()
+            .casefold()
+        )
+
+        if query:
+            profiles = [
+                profile
+                for profile in profiles
+                if (
+                    query
+                    in self._account_name(
+                        profile
+                    ).casefold()
+                    or query
+                    in self._runtime_status(
+                        profile
+                    ).casefold()
+                )
+            ]
+
         mode = self.sort_mode.get()
 
         if mode == "Z→A":
             return sorted(
                 profiles,
-                key=lambda item: item.profile_name.casefold(),
+                key=lambda item:
+                self._account_name(
+                    item
+                ).casefold(),
                 reverse=True,
             )
 
@@ -1403,441 +1449,604 @@ class LauncherApp(ctk.CTk):
             return sorted(
                 profiles,
                 key=lambda item: (
-                    self._runtime_status(item).casefold(),
-                    item.profile_name.casefold(),
+                    self._runtime_status(
+                        item
+                    ).casefold(),
+                    self._account_name(
+                        item
+                    ).casefold(),
                 ),
             )
 
         return sorted(
             profiles,
-            key=lambda item: item.profile_name.casefold(),
+            key=lambda item:
+            self._account_name(
+                item
+            ).casefold(),
         )
 
     def _refresh(self):
-        if not hasattr(self, "rows_frame"):
+        if not hasattr(
+            self,
+            "rows_frame",
+        ):
             return
 
-        valid_ids = {profile.profile_id for profile in self.controller.profiles}
-        self.checked.intersection_update(valid_ids)
+        valid_ids = {
+            profile.profile_id
+            for profile
+            in self.controller.profiles
+        }
+        self.checked.intersection_update(
+            valid_ids
+        )
 
         if self.selected_profile_id not in valid_ids:
             self.selected_profile_id = None
 
-        for child in self.rows_frame.winfo_children():
+        for child in (
+            self.rows_frame
+            .winfo_children()
+        ):
             child.destroy()
 
         self.profile_rows.clear()
         profiles = self._sorted_profiles()
 
         self.profile_title.configure(
-            text=f"👥  Danh sách profile ({len(profiles)})"
+            text=(
+                f"Tài khoản "
+                f"({len(self.controller.profiles)})"
+            )
         )
         self.selected_label.configure(
-            text=f"Đã chọn {len(self.checked)} profile"
+            text=(
+                f"Đã chọn "
+                f"{len(self.checked)}"
+            )
         )
 
-        profile_names = [
-            profile.profile_name
-            for profile in profiles
-        ]
-
-        if hasattr(
-            self,
-            "login_profile_combo",
+        for index, profile in enumerate(
+            profiles
         ):
-            self.login_profile_combo.configure(
-                values=profile_names,
-            )
-
-            current_login_profile = (
-                self.login_profile.get()
-                .strip()
-            )
-
-            if current_login_profile not in profile_names:
-                selected = next(
-                    (
-                        profile
-                        for profile in profiles
-                        if profile.profile_id
-                        == self.selected_profile_id
-                    ),
-                    None,
-                )
-
-                if selected is not None:
-                    self.login_profile.set(
-                        selected.profile_name
-                    )
-                elif profiles:
-                    self.login_profile.set(
-                        profiles[0].profile_name
-                    )
-                else:
-                    self.login_profile.set("")
-
-            selected_login_name = (
-                self.login_profile.get()
-                .strip()
-            )
-            selected_login = next(
-                (
-                    profile
-                    for profile in profiles
-                    if profile.profile_name
-                    == selected_login_name
-                ),
-                None,
-            )
-
-            if (
-                selected_login is not None
-                and self._login_fields_profile_id
-                != selected_login.profile_id
-            ):
-                self._load_login_fields(
-                    selected_login.profile_id
-                )
-
-        boss_values = tuple(
-            BOSS_LABELS.get(key, key)
-            for key in BOSSES
-        )
-
-        for index, profile in enumerate(profiles):
             row = ProfileRow(
                 self.rows_frame,
                 profile,
-                self._runtime_status(profile),
-                checked=profile.profile_id in self.checked,
-                focused=profile.profile_id == self.selected_profile_id,
-                boss_values=boss_values,
-                size_values=SIZES,
+                self._runtime_status(
+                    profile
+                ),
+                checked=(
+                    profile.profile_id
+                    in self.checked
+                ),
+                focused=(
+                    profile.profile_id
+                    == self.selected_profile_id
+                ),
                 on_toggle=self._toggle_profile,
                 on_focus=self._focus_profile,
-                on_change=self._change_profile_options,
-                on_start=self._start_single,
-                on_stop=self._stop_single,
-                on_edit=self._open_edit_dialog,
-                on_delete=self._delete_single,
+                on_more=self._account_more,
             )
-            row.grid(row=index, column=0, sticky="ew", pady=2)
-            self.profile_rows[profile.profile_id] = row
+            row.grid(
+                row=index,
+                column=0,
+                sticky="ew",
+                pady=2,
+            )
+            self.profile_rows[
+                profile.profile_id
+            ] = row
 
         if not profiles:
+            message = (
+                "Không tìm thấy tài khoản."
+                if self.controller.profiles
+                else (
+                    "Chưa có tài khoản. "
+                    "Bấm '+ Nhập tài khoản' để bắt đầu."
+                )
+            )
             ctk.CTkLabel(
                 self.rows_frame,
-                text="Chưa có profile. Tạo profile ở phía trên.",
+                text=message,
                 text_color=COLORS["muted"],
-                font=ctk.CTkFont(size=11),
-            ).grid(row=0, column=0, pady=30)
+                font=ctk.CTkFont(size=12),
+            ).grid(
+                row=0,
+                column=0,
+                pady=34,
+            )
 
+        self.account_summary.configure(
+            text=(
+                f"{len(self.controller.profiles)} tài khoản • "
+                "profile được tạo/xóa tự động theo tài khoản"
+            )
+        )
         self._update_header_status()
 
     def _update_header_status(self):
         running = sum(
             1
-            for worker in self.controller.workers.values()
+            for worker
+            in self.controller.workers.values()
             if not worker.context.stop_event.is_set()
-            and worker.context.state not in ("STOPPED", "ERROR")
+            and worker.context.state
+            not in (
+                "STOPPED",
+                "ERROR",
+            )
         )
+        logging_in = len(
+            self._auto_login_active
+        )
+
+        if running:
+            text_value = (
+                f"● {running} đang chạy"
+            )
+        elif logging_in:
+            text_value = (
+                f"● {logging_in} đang login"
+            )
+        else:
+            text_value = "● Sẵn sàng"
+
         self.header_status.configure(
-            text=f"●  {running} đang chạy" if running else "●  Sẵn sàng",
+            text=text_value,
             text_color=COLORS["green"],
         )
 
-    def _apply_runtime_status(self, profile_id, status):
-        self.statuses[profile_id] = status
+    def _apply_runtime_status(
+        self,
+        profile_id,
+        status,
+    ):
+        self.statuses[
+            profile_id
+        ] = status
 
-        # Status sorting requires a rebuild. Otherwise update just one row,
-        # avoiding destroy/recreate of every CustomTkinter widget.
-        row = self.profile_rows.get(profile_id)
+        row = self.profile_rows.get(
+            profile_id
+        )
+
         if (
-            self.sort_mode.get() == "TT"
+            self.sort_mode.get()
+            == "TT"
             or row is None
         ):
             self._refresh()
         else:
-            row.set_status(status)
+            row.set_status(
+                status
+            )
             self._update_header_status()
 
-    def _focus_profile(self, profile_id):
-        self.selected_profile_id = profile_id
-
-        try:
-            profile = self.controller.get(
-                profile_id
-            )
-            self.login_profile.set(
-                profile.profile_name
-            )
-        except StopIteration:
-            pass
-
-        self._load_login_fields(
+    def _focus_profile(
+        self,
+        profile_id,
+    ):
+        self.selected_profile_id = (
             profile_id
         )
         self._refresh()
 
-    def _toggle_profile(self, profile_id, enabled):
+    def _toggle_profile(
+        self,
+        profile_id,
+        enabled,
+    ):
         if enabled:
-            self.checked.add(profile_id)
-            self.selected_profile_id = profile_id
-            try:
-                profile = self.controller.get(
-                    profile_id
-                )
-                self.login_profile.set(
-                    profile.profile_name
-                )
-            except StopIteration:
-                pass
-            self._load_login_fields(
+            self.checked.add(
+                profile_id
+            )
+            self.selected_profile_id = (
                 profile_id
             )
         else:
-            self.checked.discard(profile_id)
+            self.checked.discard(
+                profile_id
+            )
+
         self._refresh()
 
     def _select_all(self):
-        self.checked = {
+        # Select the currently visible/filter-matched accounts.
+        self.checked.update(
             profile.profile_id
-            for profile in self.controller.profiles
-        }
+            for profile
+            in self._sorted_profiles()
+        )
         self._refresh()
 
     def _clear_selection(self):
         self.checked.clear()
         self._refresh()
 
-    def _selected_profile(self):
-        if not self.selected_profile_id:
-            raise ValueError("Hãy chọn một profile trước")
-        return self.selected_profile_id
+    def _selected_ids(self):
+        return tuple(
+            profile.profile_id
+            for profile
+            in self.controller.profiles
+            if profile.profile_id
+            in self.checked
+        )
 
+    def _clear_notice_actions(self):
+        for child in (
+            self.notice_actions
+            .winfo_children()
+        ):
+            child.destroy()
 
-    def _choose_login_profile(
+    def _notify(
         self,
-        profile_name,
+        message,
+        level="info",
+        *,
+        actions=(),
     ):
-        profile = next(
-            (
-                item
-                for item
-                in self.controller.profiles
-                if item.profile_name
-                == profile_name
+        palette = {
+            "success": COLORS["green"],
+            "warning": COLORS["amber"],
+            "error": COLORS["red"],
+            "info": COLORS["cyan"],
+        }
+        self.notice_label.configure(
+            text=message,
+            text_color=palette.get(
+                level,
+                COLORS["text"],
             ),
-            None,
         )
+        self._clear_notice_actions()
 
-        if profile is None:
-            return
-
-        self.selected_profile_id = (
-            profile.profile_id
-        )
-        self._load_login_fields(
-            profile.profile_id
-        )
-        self._refresh()
-
-    def _selected_login_profile_id(
-        self,
-    ):
-        requested = (
-            self.login_profile.get()
-            .strip()
-        )
-
-        if requested:
-            profile = next(
-                (
-                    item
-                    for item
-                    in self.controller.profiles
-                    if item.profile_name
-                    == requested
+        for label, callback, color in actions:
+            ctk.CTkButton(
+                self.notice_actions,
+                text=label,
+                width=72,
+                height=27,
+                fg_color=color,
+                hover_color=COLORS["border_bright"],
+                font=ctk.CTkFont(
+                    size=11,
+                    weight="bold",
                 ),
-                None,
+                command=callback,
+            ).pack(
+                side="left",
+                padx=3,
             )
 
-            if profile is not None:
-                self.selected_profile_id = (
-                    profile.profile_id
-                )
-                return profile.profile_id
-
-        if self.selected_profile_id:
-            try:
-                profile = self.controller.get(
-                    self.selected_profile_id
-                )
-                self.login_profile.set(
-                    profile.profile_name
-                )
-                return profile.profile_id
-            except StopIteration:
-                pass
-
-        if len(
-            self.controller.profiles
-        ) == 1:
-            profile = (
-                self.controller.profiles[0]
-            )
-            self.selected_profile_id = (
-                profile.profile_id
-            )
-            self.login_profile.set(
-                profile.profile_name
-            )
-            return profile.profile_id
-
-        raise ValueError(
-            "Hãy chọn profile trong ô '2. Đăng nhập' trước"
-        )
-
-    def _load_login_fields(
+    def _account_more(
         self,
         profile_id,
     ):
-        self._login_fields_profile_id = (
+        try:
+            profile = self.controller.get(
+                profile_id
+            )
+        except StopIteration:
+            return
+
+        self.selected_profile_id = (
             profile_id
         )
-
-        try:
-            profile = self.controller.get(
-                profile_id
-            )
-            credentials = (
-                load_login_credentials(
-                    profile.game_path
-                )
-            )
-        except (
-            StopIteration,
-            RuntimeError,
-        ) as exc:
-            self.login_username.set("")
-            self.login_password.set("")
-            self.login_server.set(
-                SERVER_LABELS["van_lang"]
-            )
-
-            if isinstance(
-                exc,
-                RuntimeError,
-            ):
-                self._log(
-                    profile_id,
-                    "WARN",
-                    str(exc),
-                )
-            return
-
-        if credentials is None:
-            self.login_username.set("")
-            self.login_password.set("")
-            self.login_server.set(
-                SERVER_LABELS["van_lang"]
-            )
-            return
-
-        self.login_username.set(
-            credentials.username
-        )
-        self.login_password.set(
-            credentials.password
-        )
-        self.login_server.set(
-            SERVER_LABELS[
-                credentials.server
-            ]
+        username = self._account_name(
+            profile
         )
 
-    def _login_credentials_from_ui(
-        self,
-    ):
-        server_label = (
-            self.login_server.get()
+        self._notify(
+            f"{username} • thao tác riêng",
+            "info",
+            actions=(
+                (
+                    "Login",
+                    lambda pid=profile_id:
+                    self._login_accounts(
+                        (pid,)
+                    ),
+                    COLORS["green"],
+                ),
+                (
+                    "Xóa",
+                    lambda pid=profile_id:
+                    self._request_delete(
+                        (pid,)
+                    ),
+                    "#35121B",
+                ),
+            ),
+        )
+        self._refresh()
+
+    def _open_account_import(self):
+        source = (
+            self.source.get()
             .strip()
         )
-        server = SERVER_KEYS.get(
-            server_label
+
+        if not source:
+            self._notify(
+                "Hãy chọn thư mục Game gốc trước khi nhập tài khoản.",
+                "warning",
+            )
+            return
+
+        existing = [
+            self._account_name(
+                profile
+            )
+            for profile
+            in self.controller.profiles
+        ]
+
+        AccountImportDialog(
+            self,
+            existing_usernames=existing,
+            on_import=self._import_accounts,
         )
 
-        if server is None:
-            raise ValueError(
-                f"Server không hợp lệ: {server_label}"
+    def _import_accounts(
+        self,
+        entries,
+        auto_login,
+    ):
+        source = (
+            self.source.get()
+            .strip()
+        )
+
+        if not source:
+            self._notify(
+                "Chưa có thư mục Game gốc.",
+                "error",
+            )
+            return
+
+        self.controller.settings_store.save(
+            AppSettings(
+                source,
+                self.window_layout_mode,
+            )
+        )
+
+        self._notify(
+            (
+                f"Đang tạo {len(entries)} "
+                "tài khoản/profile..."
+            ),
+            "info",
+        )
+
+        def work():
+            created_ids = []
+            failed = []
+
+            for entry in entries:
+                try:
+                    profile = (
+                        self.controller
+                        .prepare_account(
+                            entry.username,
+                            entry.server,
+                            source,
+                        )
+                    )
+
+                    size = self.batch_size.get()
+                    boss = BOSS_KEYS.get(
+                        self.batch_boss.get(),
+                        self.batch_boss.get(),
+                    )
+                    profile = (
+                        self.controller
+                        .set_options(
+                            profile.profile_id,
+                            boss,
+                            size,
+                        )
+                    )
+
+                    self.after(
+                        0,
+                        self._status,
+                        profile.profile_id,
+                        "Copying Game",
+                    )
+
+                    self.controller.manager.clone_profile(
+                        profile,
+                        Path(source),
+                    )
+                    save_login_credentials(
+                        profile.game_path,
+                        entry.credentials(),
+                    )
+                    created_ids.append(
+                        profile.profile_id
+                    )
+
+                    self.after(
+                        0,
+                        self._status,
+                        profile.profile_id,
+                        "Chưa đăng nhập",
+                    )
+
+                except Exception as exc:
+                    failed.append(
+                        (
+                            entry.username,
+                            str(exc),
+                        )
+                    )
+
+            self.after(
+                0,
+                self._finish_account_import,
+                tuple(created_ids),
+                tuple(failed),
+                bool(auto_login),
             )
 
-        return LoginCredentials(
-            username=(
-                self.login_username
-                .get()
-                .strip()
-            ),
-            password=(
-                self.login_password
-                .get()
-            ),
-            server=server,
-        ).validate()
+        threading.Thread(
+            target=work,
+            daemon=True,
+            name="account-import",
+        ).start()
 
-    def _auto_login_selected(self):
+    def _finish_account_import(
+        self,
+        created_ids,
+        failed,
+        auto_login,
+    ):
+        self.checked.update(
+            created_ids
+        )
+        self._refresh()
+
+        if failed:
+            first = "; ".join(
+                f"{name}: {error}"
+                for name, error
+                in failed[:3]
+            )
+            self._notify(
+                (
+                    f"Đã tạo {len(created_ids)} tài khoản; "
+                    f"{len(failed)} lỗi. {first}"
+                ),
+                "warning",
+            )
+        else:
+            self._notify(
+                (
+                    f"Đã tạo {len(created_ids)} "
+                    "tài khoản và profile tương ứng."
+                ),
+                "success",
+            )
+
+        if (
+            auto_login
+            and created_ids
+        ):
+            self._login_accounts(
+                created_ids
+            )
+
+    def _login_selected_accounts(self):
+        ids = self._selected_ids()
+
+        if not ids:
+            self._notify(
+                "Chọn ít nhất một tài khoản để Login.",
+                "warning",
+            )
+            return
+
+        self._login_accounts(
+            ids
+        )
+
+    def _login_accounts(
+        self,
+        profile_ids,
+    ):
+        if self._login_queue_active:
+            self._notify(
+                "Đang có hàng đợi Login. Hãy chờ hàng đợi hiện tại hoàn tất.",
+                "warning",
+            )
+            return
+
+        self._login_queue = list(
+            profile_ids
+        )
+        self._login_queue_active = True
+        self._suspend_keep_above = True
+
+        self._notify(
+            (
+                f"Bắt đầu Login "
+                f"{len(self._login_queue)} tài khoản..."
+            ),
+            "info",
+        )
+        self._run_next_login()
+
+    def _run_next_login(self):
+        if not self._login_queue:
+            self._login_queue_active = False
+            self._suspend_keep_above = False
+            self._notify(
+                "Hàng đợi Login đã hoàn tất.",
+                "success",
+            )
+            self._update_header_status()
+            return
+
+        profile_id = (
+            self._login_queue.pop(0)
+        )
+
         try:
-            profile_id = (
-                self._selected_login_profile_id()
-            )
             profile = self.controller.get(
                 profile_id
             )
-
             self.controller.manager.check_clone(
                 profile
             )
-            self._ensure_proxy_routing_current()
-
-            credentials = (
-                self._login_credentials_from_ui()
+            credentials = load_login_credentials(
+                profile.game_path
             )
 
-            save_login_credentials(
-                profile.game_path,
-                credentials,
-            )
+            if credentials is None:
+                raise RuntimeError(
+                    "Không có credential đã lưu cho tài khoản"
+                )
 
             if profile_id in self._auto_login_active:
-                raise ValueError(
-                    "Profile này đang auto login"
+                raise RuntimeError(
+                    "Tài khoản đang Login"
                 )
 
             self._auto_login_active.add(
                 profile_id
             )
-            self._suspend_keep_above = True
-
             self._run_auto_login(
                 profile,
                 credentials,
+                on_complete=self._run_next_login,
             )
 
-        except (
-            ValueError,
-            OSError,
-            RuntimeError,
-        ) as exc:
-            showerror(
-                "Auto Login",
-                str(exc),
-                parent=self,
+        except Exception as exc:
+            self._error(
+                profile_id,
+                exc,
+            )
+            self._notify(
+                (
+                    f"{profile_id}: {exc} • "
+                    "tiếp tục tài khoản kế tiếp"
+                ),
+                "warning",
+            )
+            self.after(
+                100,
+                self._run_next_login,
             )
 
     def _run_auto_login(
         self,
         profile,
         credentials,
+        *,
+        on_complete=None,
     ):
         context = (
             ProfileRuntimeContext
@@ -1846,7 +2055,9 @@ class LauncherApp(ctk.CTk):
             )
         )
         cancel = context.stop_event
-
+        self._login_contexts[
+            profile.profile_id
+        ] = context
         self.creation_events[
             profile.profile_id
         ] = cancel
@@ -1871,6 +2082,8 @@ class LauncherApp(ctk.CTk):
             )
 
         def work():
+            updated = None
+
             try:
                 self.after(
                     0,
@@ -1880,9 +2093,6 @@ class LauncherApp(ctk.CTk):
                 )
 
                 with PROFILE_LAUNCH_LOCK:
-                    # Registry auth is global per Windows user. Clear only the
-                    # TMLH auth keys so a stale previous account cannot make a
-                    # failed fresh login look successful.
                     clear_current_auth_values()
 
                     (
@@ -1912,6 +2122,15 @@ class LauncherApp(ctk.CTk):
                         True,
                     )
 
+                    # The window joins the chosen layout before credential
+                    # typing starts, so foreground clicks remain predictable
+                    # even with many accounts.
+                    self.after(
+                        0,
+                        self._apply_window_layout,
+                    )
+                    cancel.wait(0.25)
+
                     runner = AutoLoginRunner(
                         on_status=post_status,
                         on_log=post_log,
@@ -1921,19 +2140,14 @@ class LauncherApp(ctk.CTk):
                         credentials,
                     )
 
-                    # Persist the registry auth only after the automated login
-                    # interaction has completed. Retry briefly because the
-                    # game may write its auth values asynchronously.
                     post_log(
                         "Auto login: đang xác nhận auth..."
                     )
-
                     deadline = (
                         time.monotonic()
                         + AUTO_LOGIN_AUTH_CONFIRM_TIMEOUT
                     )
                     last_error = None
-                    updated = None
 
                     while (
                         time.monotonic()
@@ -1964,8 +2178,7 @@ class LauncherApp(ctk.CTk):
                     if updated is None:
                         raise RuntimeError(
                             (
-                                "Đã thao tác đăng nhập nhưng chưa thấy "
-                                "auth mới của game trong Registry"
+                                "Chưa thấy auth mới trong Registry"
                                 + (
                                     f": {last_error}"
                                     if last_error
@@ -1978,7 +2191,9 @@ class LauncherApp(ctk.CTk):
                     0,
                     self._auto_login_success,
                     profile.profile_id,
-                    updated.profile_name,
+                    self._account_name(
+                        updated
+                    ),
                 )
 
             except InterruptedError:
@@ -1998,12 +2213,12 @@ class LauncherApp(ctk.CTk):
                 )
                 self.after(
                     0,
-                    lambda message=str(exc):
-                    showerror(
-                        "Auto Login",
-                        message,
-                        parent=self,
+                    self._notify,
+                    (
+                        f"{self._account_name(profile)}: "
+                        f"{exc}"
                     ),
+                    "error",
                 )
 
             finally:
@@ -2011,6 +2226,7 @@ class LauncherApp(ctk.CTk):
                     0,
                     self._auto_login_finished,
                     profile.profile_id,
+                    on_complete,
                 )
 
         threading.Thread(
@@ -2025,207 +2241,281 @@ class LauncherApp(ctk.CTk):
     def _auto_login_success(
         self,
         profile_id,
-        profile_name,
+        account_name,
     ):
         self._status(
             profile_id,
             "Ready",
         )
         self._log(
-            profile_name,
+            account_name,
             "SUCCESS",
-            (
-                "Auto login thành công • "
-                "đã lưu auth riêng cho profile"
-            ),
+            "Auto login thành công • auth đã lưu",
         )
-        showinfo(
-            "Auto Login",
-            (
-                f"{profile_name}: đăng nhập thành công.\n"
-                "Auth của profile đã được lưu riêng."
-            ),
-            parent=self,
+        self._notify(
+            f"✓ {account_name}: đăng nhập thành công.",
+            "success",
         )
 
     def _auto_login_finished(
         self,
         profile_id,
+        on_complete=None,
     ):
         self.creation_events.pop(
+            profile_id,
+            None,
+        )
+        self._login_contexts.pop(
             profile_id,
             None,
         )
         self._auto_login_active.discard(
             profile_id
         )
-        self._suspend_keep_above = bool(
-            self._auto_login_active
-        )
-        keep_above_game(
-            self
-        )
+        self._apply_window_layout()
 
-
-    def _change_profile_options(self, profile_id, boss_label, size):
-        try:
-            boss = BOSS_KEYS.get(boss_label, boss_label)
-            profile = self.controller.set_options(profile_id, boss, size)
-            self.selected_profile_id = profile_id
-            self._log(
-                profile.profile_name,
-                "OPTIONS",
-                f"{BOSS_LABELS.get(profile.selected_boss, profile.selected_boss)} • {size}",
+        if callable(on_complete):
+            self.after(
+                100,
+                on_complete,
             )
-            self._apply_window_layout()
-        except (ValueError, OSError) as exc:
-            showerror("Profile options", str(exc), parent=self)
-            self._refresh()
-
-    def _open_edit_dialog(self, profile_id):
-        try:
-            profile = self.controller.get(profile_id)
-            self.selected_profile_id = profile_id
-
-            EditProfileDialog(
-                self,
-                profile,
-                tuple(BOSS_LABELS.get(key, key) for key in BOSSES),
-                SIZES,
-                self._save_profile_edit,
-            )
-        except (ValueError, OSError) as exc:
-            showerror("Sửa profile", str(exc), parent=self)
-
-    def _save_profile_edit(self, old_profile_id, new_name, boss_label, size):
-        try:
-            boss = BOSS_KEYS.get(boss_label, boss_label)
-            updated = self.controller.edit_profile(
-                old_profile_id,
-                new_name,
-                boss,
-                size,
+        else:
+            self._suspend_keep_above = bool(
+                self._auto_login_active
             )
 
-            old_status = self.statuses.pop(old_profile_id, None)
-            if old_status is not None:
-                self.statuses[updated.profile_id] = old_status
+        self._update_header_status()
 
-            was_checked = old_profile_id in self.checked
-            self.checked.discard(old_profile_id)
-            if was_checked:
-                self.checked.add(updated.profile_id)
-
-            self.selected_profile_id = updated.profile_id
-            self._log(
-                updated.profile_name,
-                "SUCCESS",
-                "Đã lưu thay đổi profile",
-            )
-            self._refresh()
-
-        except (ValueError, OSError) as exc:
-            showerror("Sửa profile", str(exc), parent=self)
-            raise
-
-    def _delete_single(self, profile_id):
-        try:
-            profile = self.controller.get(profile_id)
-        except StopIteration:
-            return
-
-        if not askyesno(
-            "Xóa profile",
-            (
-                f"Xóa profile “{profile.profile_name}”?\n\n"
-                "Thư mục clone của profile cũng sẽ bị xóa.\n"
-                "Game gốc không bị ảnh hưởng."
-            ),
-            parent=self,
-        ):
-            return
-
-        try:
-            deleted = self.controller.delete_profile(profile_id)
-            self.checked.discard(profile_id)
-            self.statuses.pop(profile_id, None)
-
-            if self.selected_profile_id == profile_id:
-                self.selected_profile_id = None
-
-            self._log(
-                deleted.profile_name,
-                "SUCCESS",
-                "Đã xóa profile và clone",
-            )
-            self._refresh()
-
-        except (ValueError, OSError) as exc:
-            showerror("Xóa profile", str(exc), parent=self)
-
-    def _delete_selected(self):
-        ids = [
-            profile.profile_id
-            for profile in self.controller.profiles
-            if profile.profile_id in self.checked
-        ]
+    def _apply_batch_options(self):
+        ids = self._selected_ids()
 
         if not ids:
-            self._log("App", "WARN", "Chưa chọn profile để xóa")
+            self._notify(
+                "Chọn tài khoản trước khi áp dụng Boss/Size.",
+                "warning",
+            )
             return
 
-        if not askyesno(
-            "Xóa nhiều profile",
-            (
-                f"Xóa {len(ids)} profile đã chọn?\n\n"
-                "Các thư mục clone tương ứng cũng sẽ bị xóa."
-            ),
-            parent=self,
-        ):
-            return
-
-        failed = []
+        boss = BOSS_KEYS.get(
+            self.batch_boss.get(),
+            self.batch_boss.get(),
+        )
+        size = self.batch_size.get()
+        changed = 0
+        failures = []
 
         for profile_id in ids:
             try:
-                self.controller.delete_profile(profile_id)
-                self.statuses.pop(profile_id, None)
-                self.checked.discard(profile_id)
-            except (ValueError, OSError) as exc:
-                failed.append(f"{profile_id}: {exc}")
+                updated = (
+                    self.controller
+                    .set_options(
+                        profile_id,
+                        boss,
+                        size,
+                    )
+                )
+                changed += 1
+
+                context = (
+                    self._login_contexts
+                    .get(profile_id)
+                )
+                if context is not None:
+                    width, height = (
+                        int(part)
+                        for part
+                        in size.split("x")
+                    )
+                    context.selected_boss = boss
+                    context.window_width = width
+                    context.window_height = height
+
+                    if context.window_handle:
+                        resize_client(
+                            context.window_handle,
+                            width,
+                            height,
+                        )
+
+            except Exception as exc:
+                failures.append(
+                    f"{profile_id}: {exc}"
+                )
+
+        self._apply_window_layout()
+        self._refresh()
+
+        if failures:
+            self._notify(
+                (
+                    f"Đã áp dụng {changed}/{len(ids)}. "
+                    f"Lỗi: {'; '.join(failures[:2])}"
+                ),
+                "warning",
+            )
+        else:
+            self._notify(
+                (
+                    f"Đã áp dụng Boss/Size cho "
+                    f"{changed} tài khoản."
+                ),
+                "success",
+            )
+
+    def _request_delete(
+        self,
+        profile_ids,
+    ):
+        ids = tuple(
+            profile_id
+            for profile_id
+            in profile_ids
+            if profile_id
+            in {
+                item.profile_id
+                for item
+                in self.controller.profiles
+            }
+        )
+
+        if not ids:
+            self._notify(
+                "Không có tài khoản để xóa.",
+                "warning",
+            )
+            return
+
+        self._pending_delete_ids = ids
+        self._notify(
+            (
+                f"Xóa {len(ids)} tài khoản? "
+                "Clone game và credential tương ứng cũng sẽ bị xóa."
+            ),
+            "warning",
+            actions=(
+                (
+                    "Xóa",
+                    self._confirm_delete,
+                    "#35121B",
+                ),
+                (
+                    "Hủy",
+                    self._cancel_delete,
+                    COLORS["surface_soft"],
+                ),
+            ),
+        )
+
+    def _delete_selected(self):
+        ids = self._selected_ids()
+
+        if not ids:
+            self._notify(
+                "Chọn ít nhất một tài khoản để xóa.",
+                "warning",
+            )
+            return
+
+        self._request_delete(
+            ids
+        )
+
+    def _cancel_delete(self):
+        self._pending_delete_ids = ()
+        self._notify(
+            "Đã hủy xóa.",
+            "info",
+        )
+
+    def _confirm_delete(self):
+        ids = self._pending_delete_ids
+        self._pending_delete_ids = ()
+
+        if not ids:
+            return
+
+        # Request all associated workers/login jobs to stop first.
+        self._stop_profile_ids(
+            ids
+        )
+        self.after(
+            700,
+            self._finish_delete,
+            ids,
+        )
+
+    def _finish_delete(
+        self,
+        ids,
+    ):
+        deleted = 0
+        failures = []
+
+        for profile_id in ids:
+            try:
+                self.controller.delete_profile(
+                    profile_id
+                )
+                self.statuses.pop(
+                    profile_id,
+                    None,
+                )
+                self.checked.discard(
+                    profile_id
+                )
+                deleted += 1
+            except Exception as exc:
+                failures.append(
+                    f"{profile_id}: {exc}"
+                )
 
         if self.selected_profile_id in ids:
             self.selected_profile_id = None
 
         self._refresh()
 
-        if failed:
-            showwarning(
-                "Xóa profile",
-                "\n".join(failed),
-                parent=self,
+        if failures:
+            self._notify(
+                (
+                    f"Đã xóa {deleted}/{len(ids)}. "
+                    f"{'; '.join(failures[:2])}"
+                ),
+                "warning",
+            )
+        else:
+            self._notify(
+                (
+                    f"Đã xóa {deleted} tài khoản "
+                    "và clone tương ứng."
+                ),
+                "success",
             )
 
     # ------------------------------------------------------------------
-    # SOURCE / CREATE / LOGIN
+    # SOURCE / START / STOP
     # ------------------------------------------------------------------
 
     def _update_source_status(self):
         value = self.source.get().strip()
         launcher = (
-            Path(value) / "ThienMenhLacHong_Launcher.exe"
+            Path(value)
+            / "ThienMenhLacHong_Launcher.exe"
             if value
             else None
         )
 
-        if launcher and launcher.is_file():
+        if (
+            launcher
+            and launcher.is_file()
+        ):
             self.source_status.configure(
-                text="● Đã tìm thấy",
+                text="● OK",
                 text_color=COLORS["green"],
             )
         elif value:
             self.source_status.configure(
-                text="● Sai thư mục",
+                text="● Sai",
                 text_color=COLORS["red"],
             )
         else:
@@ -2235,289 +2525,139 @@ class LauncherApp(ctk.CTk):
             )
 
     def _browse(self):
-        selected = filedialog.askdirectory(parent=self)
+        selected = filedialog.askdirectory(
+            parent=self
+        )
 
         if selected:
-            self.source.set(selected)
-            self.controller.settings_store.save(AppSettings(selected))
+            self.source.set(
+                selected
+            )
+            self.controller.settings_store.save(
+                AppSettings(
+                    selected,
+                    self.window_layout_mode,
+                )
+            )
             self._update_source_status()
-
-    def _create(self):
-        try:
-            source = self.source.get().strip()
-            profile = self.controller.prepare_profile(
-                self.profile_name.get(),
-                source,
-            )
-            self.controller.settings_store.save(AppSettings(source))
-            self.profile_name.set("")
-            self.statuses[profile.profile_id] = "Creating"
-            self.selected_profile_id = profile.profile_id
-            self.login_profile.set(
-                profile.profile_name
-            )
-            self._login_fields_profile_id = (
-                profile.profile_id
-            )
-            self.login_username.set("")
-            self.login_password.set("")
-            self.login_server.set(
-                SERVER_LABELS["van_lang"]
-            )
-            self._refresh()
-            self._run_creation(profile, source, repair=False)
-
-        except (ValueError, OSError) as exc:
-            showerror("Tạo profile", str(exc), parent=self)
-
-    def _run_creation(
-        self,
-        profile,
-        source,
-        repair,
-    ):
-        cancel = threading.Event()
-        self.creation_events[
-            profile.profile_id
-        ] = cancel
-
-        def work():
-            try:
-                self.after(
-                    0,
-                    self._status,
-                    profile.profile_id,
-                    "Copying Game",
-                )
-
-                if repair:
-                    self.controller.repair_profile(
-                        profile.profile_id,
-                        source,
-                    )
-                else:
-                    self.controller.manager.clone_profile(
-                        profile,
-                        source,
-                    )
-
-                if cancel.is_set():
-                    return
-
-                self.after(
-                    0,
-                    self._creation_ready_for_login,
-                    profile.profile_id,
-                    profile.profile_name,
-                )
-
-            except Exception as exc:
-                self.after(
-                    0,
-                    self._error,
-                    profile.profile_id,
-                    exc,
-                )
-            finally:
-                self.creation_events.pop(
-                    profile.profile_id,
-                    None,
-                )
-
-        threading.Thread(
-            target=work,
-            daemon=True,
-            name=(
-                f"create-"
-                f"{profile.profile_id}"
-            ),
-        ).start()
-
-    def _creation_ready_for_login(
-        self,
-        profile_id,
-        profile_name,
-    ):
-        self.selected_profile_id = (
-            profile_id
-        )
-        self.login_profile.set(
-            profile_name
-        )
-        self._status(
-            profile_id,
-            "Chưa đăng nhập",
-        )
-        self._log(
-            profile_name,
-            "SUCCESS",
-            (
-                "Profile đã tạo xong. "
-                "Nhập tài khoản + mật khẩu ở mục '2. Đăng nhập' "
-                "rồi bấm 'Tự đăng nhập + tự lưu'."
-            ),
-        )
-        self._refresh()
-
-    def _continue_login(self):
-        try:
-            self._continue_login_for(
-                self._selected_login_profile_id()
-            )
-        except (ValueError, OSError, RuntimeError) as exc:
-            showerror("Mở game", str(exc), parent=self)
-
-    def _continue_login_for(self, profile_id):
-        try:
-            profile = self.controller.get(profile_id)
-            self.selected_profile_id = profile_id
-            self.controller.manager.check_clone(profile)
-            self._ensure_proxy_routing_current()
-            self._open_for_login(profile)
-            self._refresh()
-
-        except (ValueError, OSError) as exc:
-            showerror("Mở game", str(exc), parent=self)
-
-    def _open_for_login(self, profile):
-        cancel = threading.Event()
-        self.creation_events[profile.profile_id] = cancel
-
-        def work():
-            try:
-                self.after(0, self._status, profile.profile_id, "Launching Game")
-
-                with PROFILE_LAUNCH_LOCK:
-                    _pid, _hwnd, launched = acquire_profile_window(
-                        profile.game_path,
-                        cancel,
-                        window_title=profile.profile_name,
-                    )
-                    set_window_topmost(_hwnd, True)
-
-                    if launched:
-                        self.after(0, self._status, profile.profile_id, "Waiting Startup")
-                        if cancel.wait(10):
-                            return
-
-                if not cancel.is_set():
-                    self.after(0, self._status, profile.profile_id, "Đăng nhập thủ công")
-
-            except Exception as exc:
-                self.after(0, self._error, profile.profile_id, exc)
-
-        threading.Thread(
-            target=work,
-            daemon=True,
-            name=f"login-{profile.profile_id}",
-        ).start()
-
-    def _confirm_login(self):
-        try:
-            profile_id = self._selected_login_profile_id()
-
-            if self.statuses.get(profile_id) != "Đăng nhập thủ công":
-                raise ValueError(
-                    "Bước thủ công: bấm 'Mở thủ công', đăng nhập trong game, "
-                    "sau đó bấm 'Xác nhận đã đăng nhập'"
-                )
-
-            profile = self.controller.confirm_login(profile_id)
-            self._status(profile_id, "Ready")
-            self._log(
-                profile.profile_name,
-                "SUCCESS",
-                "Đã lưu auth riêng cho profile",
-            )
-
-        except (
-            ValueError,
-            OSError,
-            RuntimeError,
-        ) as exc:
-            showerror(
-                "Xác nhận đăng nhập",
-                str(exc),
-                parent=self,
-            )
-
-    # ------------------------------------------------------------------
-    # START / STOP
-    # ------------------------------------------------------------------
 
     def _worker_callbacks(self):
         return {
-            "on_status": lambda pid, state: self.after(
+            "on_status":
+            lambda pid, state:
+            self.after(
                 0,
                 self._worker_status,
                 pid,
                 state,
             ),
-            "on_error": lambda pid, exc: self.after(
+            "on_error":
+            lambda pid, exc:
+            self.after(
                 0,
                 self._worker_error,
                 pid,
                 exc,
             ),
-            "on_log": lambda pid, message: self._log_queue.put(
-                (pid, message)
+            "on_log":
+            lambda pid, message:
+            self._log_queue.put(
+                (
+                    pid,
+                    message,
+                )
             ),
         }
 
-    def _start_profile_ids(self, profile_ids):
+    def _start_profile_ids(
+        self,
+        profile_ids,
+    ):
         self._ensure_proxy_routing_current()
-
         self.controller.start_selected(
             profile_ids,
             **self._worker_callbacks(),
         )
         self._refresh()
+        self._apply_window_layout()
 
     def _start_selected(self):
-        if not self.checked:
-            self._log("App", "WARN", "Hãy chọn ít nhất một profile")
+        ids = self._selected_ids()
+
+        if not ids:
+            self._notify(
+                "Chọn ít nhất một tài khoản để Start.",
+                "warning",
+            )
             return
 
         try:
-            ids = tuple(
-                profile.profile_id
-                for profile in self.controller.profiles
-                if profile.profile_id in self.checked
+            self._start_profile_ids(
+                ids
             )
-            self._start_profile_ids(ids)
-
-        except (ValueError, OSError, RuntimeError) as exc:
-            showerror("Start profiles", str(exc), parent=self)
-
-    def _start_single(self, profile_id):
-        try:
-            self.checked.add(profile_id)
-            self.selected_profile_id = profile_id
-            self._start_profile_ids((profile_id,))
-
-        except (ValueError, OSError, RuntimeError) as exc:
-            showerror("Start profile", str(exc), parent=self)
+            self._notify(
+                f"Đã Start {len(ids)} tài khoản.",
+                "success",
+            )
+        except Exception as exc:
+            self._notify(
+                f"Start lỗi: {exc}",
+                "error",
+            )
 
     def _stop_selected(self):
-        if not self.checked:
-            self._log("App", "WARN", "Không có profile nào được chọn")
+        ids = self._selected_ids()
+
+        if not ids:
+            self._notify(
+                "Chọn ít nhất một tài khoản để Stop.",
+                "warning",
+            )
             return
-        self._stop_profile_ids(tuple(self.checked))
 
-    def _stop_single(self, profile_id):
-        self._stop_profile_ids((profile_id,))
+        self._stop_profile_ids(
+            ids
+        )
+        self._notify(
+            f"Đang Stop {len(ids)} tài khoản...",
+            "info",
+        )
 
-    def _stop_profile_ids(self, profile_ids):
-        self.controller.stop_selected(profile_ids)
+    def _stop_single(
+        self,
+        profile_id,
+    ):
+        self._stop_profile_ids(
+            (profile_id,)
+        )
+
+    def _stop_profile_ids(
+        self,
+        profile_ids,
+    ):
+        self.controller.stop_selected(
+            profile_ids
+        )
 
         for profile_id in profile_ids:
-            pending = self.creation_events.get(
-                profile_id
+            pending = (
+                self.creation_events
+                .get(profile_id)
             )
             if pending is not None:
                 pending.set()
 
-            worker = self.controller.workers.get(profile_id)
+            context = (
+                self._login_contexts
+                .get(profile_id)
+            )
+            if context is not None:
+                context.stop_event.set()
+
+            worker = (
+                self.controller.workers
+                .get(profile_id)
+            )
 
             if worker is None:
                 if pending is not None:
@@ -2526,14 +2666,25 @@ class LauncherApp(ctk.CTk):
                     ] = "Stopping"
                 continue
 
-            hwnd = worker.context.window_handle
+            hwnd = (
+                worker.context
+                .window_handle
+            )
             if hwnd:
                 try:
-                    set_window_topmost(hwnd, False)
-                except (ValueError, OSError):
+                    set_window_topmost(
+                        hwnd,
+                        False,
+                    )
+                except (
+                    ValueError,
+                    OSError,
+                ):
                     pass
 
-            self.statuses[profile_id] = "Stopping"
+            self.statuses[
+                profile_id
+            ] = "Stopping"
 
         self._refresh()
 
