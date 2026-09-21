@@ -18,6 +18,8 @@ def make_profile(profile_id="p1"):
         window_width=480,
         window_height=270,
         created_at="2026-09-20T00:00:00Z",
+        account_username="account-1",
+        server="au_lac",
     )
 
 
@@ -66,5 +68,13 @@ def test_resolution_validation():
 
 def test_app_settings_round_trip(tmp_path):
     storage = AppSettingsStorage(tmp_path / "settings.json")
-    storage.save(AppSettings(game_source_path="D:/Game"))
-    assert storage.load() == AppSettings(game_source_path="D:/Game")
+    storage.save(
+        AppSettings(
+            game_source_path="D:/Game",
+            window_layout_mode="stack",
+        )
+    )
+    assert storage.load() == AppSettings(
+        game_source_path="D:/Game",
+        window_layout_mode="stack",
+    )
