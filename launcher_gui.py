@@ -358,6 +358,7 @@ class LauncherApp(ctk.CTk):
         self._last_layout_signature = None
         self._suspend_keep_above = False
         self._auto_login_active = set()
+        self._login_fields_profile_id = None
 
         # Worker OCR/debug logs are batched onto the Tk thread instead of
         # scheduling one GUI callback per profile per second.
@@ -1351,6 +1352,29 @@ class LauncherApp(ctk.CTk):
                 else:
                     self.login_profile.set("")
 
+            selected_login_name = (
+                self.login_profile.get()
+                .strip()
+            )
+            selected_login = next(
+                (
+                    profile
+                    for profile in profiles
+                    if profile.profile_name
+                    == selected_login_name
+                ),
+                None,
+            )
+
+            if (
+                selected_login is not None
+                and self._login_fields_profile_id
+                != selected_login.profile_id
+            ):
+                self._load_login_fields(
+                    selected_login.profile_id
+                )
+
         boss_values = tuple(
             BOSS_LABELS.get(key, key)
             for key in BOSSES
@@ -1554,6 +1578,10 @@ class LauncherApp(ctk.CTk):
         self,
         profile_id,
     ):
+        self._login_fields_profile_id = (
+            profile_id
+        )
+
         try:
             profile = self.controller.get(
                 profile_id
@@ -2097,6 +2125,9 @@ class LauncherApp(ctk.CTk):
             self.selected_profile_id = profile.profile_id
             self.login_profile.set(
                 profile.profile_name
+            )
+            self._login_fields_profile_id = (
+                profile.profile_id
             )
             self.login_username.set("")
             self.login_password.set("")
