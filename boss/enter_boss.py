@@ -74,17 +74,11 @@ def parse_packet(hexstr: str):
     return plen, group, opcode, hexstr[24:]
 
 
-def discover_game_remote(
+def _established_remotes(
     process: psutil.Process,
-) -> dict:
-    """
-    Tìm gameplay socket :1002
-    của đúng PID/profile.
-
-    IP gameplay được lấy động tại runtime.
-    """
-
-    connections = []
+) -> list[dict]:
+    remotes = []
+    seen = set()
 
     for conn in process.net_connections(
         kind="tcp"
@@ -98,76 +92,116 @@ def discover_game_remote(
         ):
             continue
 
-        connections.append(
-            (
-                conn.raddr.ip,
-                conn.raddr.port,
-            )
+        key = (
+            conn.raddr.ip,
+            conn.raddr.port,
         )
 
-    # Tìm gameplay socket :1002.
-    for ip, port in connections:
-        if port == GAMEPLAY_PORT:
-            return {
-                "ip": ip,
-                "port": port,
+        if key in seen:
+            continue
+
+        seen.add(key)
+        remotes.append(
+            {
+                "ip": conn.raddr.ip,
+                "port": conn.raddr.port,
             }
-
-    # Có connection nhưng chưa có :1002.
-    if connections:
-        candidates = ", ".join(
-            f"{ip}:{port}"
-            for ip, port
-            in sorted(
-                set(connections)
-            )
         )
 
+    return remotes
+
+
+def discover_game_remotes(
+    process: psutil.Process,
+) -> list[dict]:
+    """
+    Return plausible gameplay sockets for the exact game PID.
+
+    :1002 remains the preferred known gameplay port, but it is no longer a
+    hard requirement. Different servers/routes can expose another remote
+    port. The known login socket :8001 is excluded; remaining ESTABLISHED
+    sockets are passed to the Frida hook, which identifies the real gameplay
+    socket from game-protocol-shaped outgoing traffic.
+    """
+    remotes = _established_remotes(
+        process
+    )
+
+    gameplay = [
+        remote
+        for remote in remotes
+        if remote["port"] != LOGIN_PORT
+    ]
+
+    gameplay.sort(
+        key=lambda remote: (
+            0
+            if remote["port"]
+            == GAMEPLAY_PORT
+            else 1,
+            remote["port"],
+            remote["ip"],
+        )
+    )
+
+    if gameplay:
+        return gameplay
+
+    if remotes:
+        candidates = ", ".join(
+            (
+                f"{remote['ip']}:"
+                f"{remote['port']}"
+            )
+            for remote in remotes
+        )
         raise RuntimeError(
             (
-                f"PID {process.pid} "
-                f"chưa có gameplay socket "
-                f":{GAMEPLAY_PORT}. "
-                f"Socket hiện tại: "
-                f"{candidates}"
+                f"PID {process.pid} chưa có gameplay socket khả dụng. "
+                f"Socket hiện tại: {candidates}"
             )
         )
 
     raise RuntimeError(
         (
             f"PID {process.pid} "
-            "không có TCP connection "
-            "ESTABLISHED"
+            "không có TCP connection ESTABLISHED"
         )
     )
 
+
+def discover_game_remote(
+    process: psutil.Process,
+) -> dict:
+    """
+    Backward-compatible single-remote helper.
+
+    Prefer :1002 when present; otherwise return the best dynamic candidate.
+    """
+    return discover_game_remotes(
+        process
+    )[0]
+
+
 def has_gameplay_socket(pid: int) -> bool:
     """
-    True khi đúng PID game có TCP gameplay socket :1002.
+    Readiness check for the exact PID.
 
-    Không khóa IP server vì IP gameplay có thể
-    khác nhau theo máy/mạng/server route.
+    Historically this required remote port :1002. We now accept any
+    ESTABLISHED non-login socket because server/route selection can change
+    the remote gameplay port. Startup UI still has to be absent continuously
+    before AutomationWorker treats this as IN_GAME.
     """
     try:
         process = psutil.Process(pid)
+        remotes = _established_remotes(
+            process
+        )
 
-        for conn in process.net_connections(
-            kind="tcp"
-        ):
-            if not conn.raddr:
-                continue
-
-            if (
-                conn.status
-                != psutil.CONN_ESTABLISHED
-            ):
-                continue
-
-            if (
-                conn.raddr.port
-                == GAMEPLAY_PORT
-            ):
-                return True
+        return any(
+            remote["port"] != LOGIN_PORT
+            for remote in remotes
+        )
 
     except psutil.NoSuchProcess:
         return False
@@ -183,7 +217,7 @@ def has_gameplay_socket(pid: int) -> bool:
     except psutil.Error:
         return False
 
-    return False
+
 # ---------- Gửi ----------
 def send_packet(pid: int, packet: str, wait: float, stop_event=None) -> int:
     wait_started = time.perf_counter()
@@ -218,13 +252,19 @@ def _send_packet_impl(pid: int, packet: str, wait: float, stop_event=None) -> in
 
     process = psutil.Process(pid)
 
-    remote = discover_game_remote(process)
+    remotes = discover_game_remotes(
+        process
+    )
 
     source = (
         Path(__file__)
         .with_suffix(".js")
         .read_text(encoding="utf-8")
-        .replace("__TARGET__", json.dumps(remote), 1)
+        .replace(
+            "__TARGETS__",
+            json.dumps(remotes),
+            1,
+        )
     )
 
     session = frida.attach(process.pid)
@@ -246,10 +286,19 @@ def _send_packet_impl(pid: int, packet: str, wait: float, stop_event=None) -> in
                 time.sleep(0.1)
 
         if not script.exports_sync.ready():
+            candidates = ", ".join(
+                (
+                    f"{remote['ip']}:"
+                    f"{remote['port']}"
+                )
+                for remote in remotes
+            )
             raise RuntimeError(
-                f"Không thấy traffic game tới "
-                f"{remote['ip']}:{remote['port']} "
-                f"trên PID {process.pid}"
+                (
+                    "Không nhận diện được gameplay traffic "
+                    f"trên PID {process.pid}. "
+                    f"Candidate sockets: {candidates}"
+                )
             )
 
         if stop_event is not None and stop_event.is_set():
