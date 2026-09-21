@@ -14,6 +14,19 @@ SIGNAL_2 = (742, 437, 45, 24)
 SIGNAL_3 = (392, 389, 75, 35)
 BOSS_HP = (375, 8, 66, 22)
 
+# Primary boss-alive detector.
+BOSS_ALIVE_MARKER = (443, 27, 12, 18)
+BOSS_ALIVE_ASSET = "asset__x443_y27_w12_h18.png"
+BOSS_ALIVE_MATCH_THRESHOLD = 0.82
+
+# Only invoke the heavier OCR safety fallback after the asset has missed on
+# three consecutive 1-second scans.
+BOSS_ASSET_MISSES_BEFORE_OCR = 3
+
+# A boss that is continuously reported alive for too long is treated as a
+# stuck/invalid signal and forcibly exited.
+BOSS_ALIVE_SIGNAL_TIMEOUT_SECONDS = 300.0
+
 # Boss-name OCR box in canonical 860x484 coordinates.
 BOSS_NAME_ROI = (361, 27, 91, 18)
 BOSS_NAME_LABELS = {
@@ -39,7 +52,7 @@ ALIVE_DEBUG_LOG_INTERVAL = 10.0
 
 BOSS_ENTER_WAIT = 3.0
 
-# Quét tên boss mỗi 1 giây.
+# Quét boss mỗi 1 giây.
 BOSS_OCR_INTERVAL = 1.0
 
 # Phân tán thời điểm scan giữa nhiều profile để tránh 10 cửa sổ
