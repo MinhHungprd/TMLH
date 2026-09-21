@@ -6,13 +6,12 @@ import cv2
 import numpy as np
 
 from automation_constants import BASE_HEIGHT, BASE_WIDTH
-from capture_broker import BOSS_CAPTURE_BROKER
+from capture_broker import SCREEN_CAPTURE_BROKER
 from perf_metrics import perf_timer
 
-# ImageGrab/GDI capture from many profile threads at the exact same instant
-# can create large latency spikes. Keep a small amount of parallelism while
-# preventing an unbounded capture burst.
-_SCREEN_CAPTURE_SEMAPHORE = threading.BoundedSemaphore(4)
+# PIL is only a fallback now. Keep fallback capture fully serialized so a
+# failed MSS backend cannot create a burst of concurrent GDI captures.
+_SCREEN_CAPTURE_SEMAPHORE = threading.BoundedSemaphore(1)
 
 
 def scale_roi(base_roi, width: int, height: int):
@@ -57,34 +56,73 @@ def get_client_size(hwnd: int) -> tuple[int, int]:
     return rect[2], rect[3]
 
 
-def capture_client(hwnd: int) -> np.ndarray:
+def _capture_rect_pil(
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    """Serialized PIL fallback used only when MSS is unavailable."""
     from PIL import ImageGrab
+
+    with _SCREEN_CAPTURE_SEMAPHORE:
+        image = ImageGrab.grab(
+            (
+                left,
+                top,
+                left + width,
+                top + height,
+            )
+        )
+
+    return cv2.cvtColor(
+        np.array(image),
+        cv2.COLOR_RGB2GRAY,
+    )
+
+
+def capture_client(hwnd: int) -> np.ndarray:
+    """
+    Capture one client frame on demand through the shared MSS broker.
+
+    Startup/respawn asset scans use the same single capture worker as boss
+    scans, eliminating concurrent screen-grab bursts. PIL remains a safe,
+    fully serialized fallback.
+    """
     import win32gui
 
     with perf_timer("capture_ms"):
-        left, top = win32gui.ClientToScreen(hwnd, (0, 0))
-        width, height = get_client_size(hwnd)
-        with _SCREEN_CAPTURE_SEMAPHORE:
-            image = ImageGrab.grab(
+        left, top = win32gui.ClientToScreen(
+            hwnd,
+            (0, 0),
+        )
+        width, height = get_client_size(
+            hwnd
+        )
+
+        try:
+            return SCREEN_CAPTURE_BROKER.capture_rect(
                 (
                     left,
                     top,
-                    left + width,
-                    top + height,
+                    width,
+                    height,
                 )
             )
-        return cv2.cvtColor(
-            np.array(image),
-            cv2.COLOR_RGB2GRAY,
-        )
+        except Exception:
+            return _capture_rect_pil(
+                left,
+                top,
+                width,
+                height,
+            )
 
 
 def _capture_client_roi_pil(
     hwnd: int,
     base_roi,
 ) -> np.ndarray:
-    """Original ImageGrab ROI path kept as a safe fallback."""
-    from PIL import ImageGrab
+    """Original ROI path kept as a serialized fallback."""
     import win32gui
 
     client_width, client_height = get_client_size(
@@ -130,19 +168,11 @@ def _capture_client_roi_pil(
         (x, y),
     )
 
-    with _SCREEN_CAPTURE_SEMAPHORE:
-        image = ImageGrab.grab(
-            (
-                left,
-                top,
-                left + w,
-                top + h,
-            )
-        )
-
-    return cv2.cvtColor(
-        np.array(image),
-        cv2.COLOR_RGB2GRAY,
+    return _capture_rect_pil(
+        left,
+        top,
+        w,
+        h,
     )
 
 
@@ -151,14 +181,10 @@ def capture_client_roi(
     base_roi,
 ) -> np.ndarray:
     """
-    Capture one base-space ROI on demand.
+    Capture one base-space ROI on demand through the shared MSS broker.
 
-    Boss scans use the global MSS broker. Near-simultaneous requests from
-    multiple workers are coalesced into one desktop grab per monitor and
-    cropped in memory. No continuous capture loop is used.
-
-    If MSS is unavailable or a batch capture fails, fall back to the original
-    PIL ImageGrab path so automation semantics remain unchanged.
+    Boss detection logic is unchanged. Only the screen-capture backend and
+    scheduling are centralized to reduce resource spikes.
     """
     import win32gui
 
@@ -207,7 +233,7 @@ def capture_client_roi(
         )
 
         try:
-            return BOSS_CAPTURE_BROKER.capture_rect(
+            return SCREEN_CAPTURE_BROKER.capture_rect(
                 (
                     left,
                     top,
