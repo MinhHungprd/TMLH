@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from automation_constants import BASE_HEIGHT, BASE_WIDTH
+from capture_broker import BOSS_CAPTURE_BROKER
 from perf_metrics import perf_timer
 
 # ImageGrab/GDI capture from many profile threads at the exact same instant
@@ -78,52 +79,147 @@ def capture_client(hwnd: int) -> np.ndarray:
         )
 
 
+def _capture_client_roi_pil(
+    hwnd: int,
+    base_roi,
+) -> np.ndarray:
+    """Original ImageGrab ROI path kept as a safe fallback."""
+    from PIL import ImageGrab
+    import win32gui
+
+    client_width, client_height = get_client_size(
+        hwnd
+    )
+    x, y, w, h = scale_roi(
+        base_roi,
+        client_width,
+        client_height,
+    )
+
+    x = max(
+        0,
+        min(
+            x,
+            client_width - 1,
+        ),
+    )
+    y = max(
+        0,
+        min(
+            y,
+            client_height - 1,
+        ),
+    )
+    w = max(
+        1,
+        min(
+            w,
+            client_width - x,
+        ),
+    )
+    h = max(
+        1,
+        min(
+            h,
+            client_height - y,
+        ),
+    )
+
+    left, top = win32gui.ClientToScreen(
+        hwnd,
+        (x, y),
+    )
+
+    with _SCREEN_CAPTURE_SEMAPHORE:
+        image = ImageGrab.grab(
+            (
+                left,
+                top,
+                left + w,
+                top + h,
+            )
+        )
+
+    return cv2.cvtColor(
+        np.array(image),
+        cv2.COLOR_RGB2GRAY,
+    )
+
+
 def capture_client_roi(
     hwnd: int,
     base_roi,
 ) -> np.ndarray:
     """
-    Capture only one base-space ROI from a game client.
+    Capture one base-space ROI on demand.
 
-    The ROI is scaled to the current client resolution before
-    grabbing pixels, so boss scanning does not need to capture
-    and resize the entire game frame every second.
+    Boss scans use the global MSS broker. Near-simultaneous requests from
+    multiple workers are coalesced into one desktop grab per monitor and
+    cropped in memory. No continuous capture loop is used.
+
+    If MSS is unavailable or a batch capture fails, fall back to the original
+    PIL ImageGrab path so automation semantics remain unchanged.
     """
-    from PIL import ImageGrab
     import win32gui
 
     with perf_timer("capture_ms"):
-        client_width, client_height = get_client_size(hwnd)
+        client_width, client_height = get_client_size(
+            hwnd
+        )
         x, y, w, h = scale_roi(
             base_roi,
             client_width,
             client_height,
         )
 
-        x = max(0, min(x, client_width - 1))
-        y = max(0, min(y, client_height - 1))
-        w = max(1, min(w, client_width - x))
-        h = max(1, min(h, client_height - y))
+        x = max(
+            0,
+            min(
+                x,
+                client_width - 1,
+            ),
+        )
+        y = max(
+            0,
+            min(
+                y,
+                client_height - 1,
+            ),
+        )
+        w = max(
+            1,
+            min(
+                w,
+                client_width - x,
+            ),
+        )
+        h = max(
+            1,
+            min(
+                h,
+                client_height - y,
+            ),
+        )
 
         left, top = win32gui.ClientToScreen(
             hwnd,
             (x, y),
         )
 
-        with _SCREEN_CAPTURE_SEMAPHORE:
-            image = ImageGrab.grab(
+        try:
+            return BOSS_CAPTURE_BROKER.capture_rect(
                 (
                     left,
                     top,
-                    left + w,
-                    top + h,
+                    w,
+                    h,
                 )
             )
-
-        return cv2.cvtColor(
-            np.array(image),
-            cv2.COLOR_RGB2GRAY,
-        )
+        except Exception:
+            return _capture_client_roi_pil(
+                hwnd,
+                base_roi,
+            )
 
 
 def normalize_roi_to_base(
