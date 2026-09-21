@@ -367,8 +367,8 @@ class LauncherApp(ctk.CTk):
         self._log_flush_after_id = None
 
         self.title(f"{APP_NAME} - Profile Bot")
-        self.geometry("480x700")
-        self.minsize(460, 640)
+        self.geometry("480x640")
+        self.minsize(460, 600)
         self.configure(fg_color=COLORS["bg"])
         self.attributes("-topmost", True)
 
