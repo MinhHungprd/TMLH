@@ -1,5 +1,6 @@
 from threading import Event
 
+from automation_constants import GAME_STATE_POLL_INTERVAL
 from game_automation import AutomationWorker, interruptible_wait
 from game_state import SignalCheck, CLICK_CENTER
 from input_manager import InputManager
@@ -75,7 +76,7 @@ def test_worker_runs_boss_cycle_on_actual_pid_and_revalidates_game():
 
 
 def test_stop_during_each_wait_prevents_new_external_actions():
-    for stop_at in (10, 0.25, 3, 2, 16):
+    for stop_at in (10, GAME_STATE_POLL_INTERVAL, 3, 2, 16):
         ctx = context()
         commands = []
         errors = []
@@ -96,7 +97,7 @@ def test_stop_during_each_wait_prevents_new_external_actions():
         )
         worker.run()
         assert ctx.state == "STOPPED", (stop_at, errors)
-        if stop_at in (10, 0.25):
+        if stop_at in (10, GAME_STATE_POLL_INTERVAL):
             assert commands == []
         if stop_at == 3:
             assert commands == ["enter"]
