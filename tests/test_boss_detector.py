@@ -295,3 +295,133 @@ def test_ocr_service_default_reports_configuration_not_type_error(
         ),
     ):
         OcrService()
+
+
+
+def test_negative_name_ocr_is_not_cached():
+    outputs = iter(
+        [
+            "",
+            "Trm cho",
+        ]
+    )
+    calls = []
+
+    class OCR:
+        def read_text(
+            self,
+            image,
+        ):
+            calls.append(
+                image.shape
+            )
+            return next(outputs)
+
+    roi = np.zeros(
+        (
+            BOSS_NAME_ROI[3],
+            BOSS_NAME_ROI[2],
+        ),
+        dtype=np.uint8,
+    )
+
+    detector = BossDetector(
+        ocr=OCR(),
+        roi_capture=(
+            lambda hwnd, base_roi:
+            roi.copy()
+        ),
+    )
+
+    context = _context(
+        "trom_cho"
+    )
+
+    assert detector.read_hp(
+        context
+    ) == ""
+    assert detector.last_debug[
+        "name_alive"
+    ] is False
+    assert detector.last_debug[
+        "cache_hit"
+    ] is False
+
+    assert detector.read_hp(
+        context
+    ) == "Trm cho"
+    assert detector.last_debug[
+        "name_alive"
+    ] is True
+
+    # Same pixels were OCR'd again because the first negative result was not
+    # cached.
+    assert len(calls) == 2
+
+
+def test_multi_variant_block_chooses_matching_candidate():
+    calls = []
+
+    class OCR:
+        def read_text_block(
+            self,
+            image,
+        ):
+            calls.append(
+                image.shape
+            )
+            return (
+                "panes\n"
+                "Trm cho\n"
+                "qqmae\n"
+            )
+
+    detector = BossDetector(
+        ocr=OCR(),
+        roi_capture=(
+            lambda hwnd, base_roi:
+            np.zeros(
+                (
+                    base_roi[3],
+                    base_roi[2],
+                ),
+                dtype=np.uint8,
+            )
+        ),
+    )
+
+    assert detector.read_hp(
+        _context("trom_cho")
+    ) == "Trm cho"
+
+    assert len(calls) == 1
+    assert detector.last_debug[
+        "name_alive"
+    ] is True
+    assert detector.last_debug[
+        "ocr_candidates"
+    ] == [
+        "panes",
+        "Trm cho",
+        "qqmae",
+        "panes Trm cho qqmae",
+    ]
+
+
+def test_local_fuzzy_match_handles_junk_around_missing_name():
+    (
+        matched,
+        ratio,
+        coverage,
+        observed,
+        expected,
+    ) = BossDetector.match_selected_boss(
+        "__ Trm cho |",
+        "trom_cho",
+    )
+
+    assert matched is True
+    assert observed == "trmcho"
+    assert expected == "tromcho"
+    assert ratio > 0.8
+    assert coverage > 0.7
