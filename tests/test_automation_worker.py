@@ -21,6 +21,9 @@ class FakeLifecycle:
     def valid(self, ctx):
         return True
 
+    def ensure_size(self, ctx):
+        return False
+
 
 class FakeDetector:
     def __init__(self, results):
