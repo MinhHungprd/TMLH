@@ -10,7 +10,7 @@ import queue
 import sys
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -27,8 +27,15 @@ from proxy_manager import (
     ProxySettingsStorage,
     apply_proxy_routing,
     routing_config_matches,
+    verify_proxy_setup,
 )
 from proxy_ui import ProxySettingsDialog
+from ui_dialogs import (
+    askyesno,
+    keep_above_game,
+    showerror,
+    showwarning,
+)
 from ui_components import CompactCard, EditProfileDialog, ProfileRow, PROFILE_COLUMN_WIDTHS
 from ui_theme import APP_NAME, APP_VERSION, BOSS_KEYS, BOSS_LABELS, COLORS
 from window_layout import arrange_windows, stack_windows_for_boss
@@ -341,6 +348,7 @@ class LauncherApp(ctk.CTk):
         self.geometry("480x620")
         self.minsize(460, 560)
         self.configure(fg_color=COLORS["bg"])
+        self.attributes("-topmost", True)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
@@ -361,6 +369,32 @@ class LauncherApp(ctk.CTk):
         self._refresh()
         self._update_source_status()
         self.protocol("WM_DELETE_WINDOW", self._close)
+        self.after(
+            500,
+            self._keep_tool_above_games,
+        )
+
+    def _keep_tool_above_games(self):
+        """
+        Game windows are intentionally TOPMOST. Re-raise the tool without
+        stealing focus so the dashboard and its child dialogs stay visible.
+        """
+        try:
+            if self.winfo_exists():
+                self.attributes(
+                    "-topmost",
+                    True,
+                )
+
+                if self.state() != "iconic":
+                    self.lift()
+
+                self.after(
+                    750,
+                    self._keep_tool_above_games,
+                )
+        except tk.TclError:
+            pass
 
     # ------------------------------------------------------------------
     # BUILD UI
@@ -708,7 +742,7 @@ class LauncherApp(ctk.CTk):
                 self.proxy_settings_store.load()
             )
         except RuntimeError as exc:
-            messagebox.showerror(
+            showerror(
                 "Proxy",
                 str(exc),
                 parent=self,
@@ -720,6 +754,20 @@ class LauncherApp(ctk.CTk):
             settings,
             on_save=self._save_proxy_settings,
             on_apply=self._apply_proxy_settings,
+            on_verify=self._verify_proxy_settings,
+        )
+
+    def _verify_proxy_settings(
+        self,
+        settings,
+    ):
+        return verify_proxy_setup(
+            tuple(
+                self.controller.profiles
+            ),
+            settings,
+            config_wait_seconds=8.0,
+            proxy_timeout=5.0,
         )
 
     def _ensure_proxy_routing_current(self):
@@ -1058,7 +1106,7 @@ class LauncherApp(ctk.CTk):
             )
             self._apply_window_layout()
         except (ValueError, OSError) as exc:
-            messagebox.showerror("Profile options", str(exc), parent=self)
+            showerror("Profile options", str(exc), parent=self)
             self._refresh()
 
     def _open_edit_dialog(self, profile_id):
@@ -1074,7 +1122,7 @@ class LauncherApp(ctk.CTk):
                 self._save_profile_edit,
             )
         except (ValueError, OSError) as exc:
-            messagebox.showerror("Sửa profile", str(exc), parent=self)
+            showerror("Sửa profile", str(exc), parent=self)
 
     def _save_profile_edit(self, old_profile_id, new_name, boss_label, size):
         try:
@@ -1104,7 +1152,7 @@ class LauncherApp(ctk.CTk):
             self._refresh()
 
         except (ValueError, OSError) as exc:
-            messagebox.showerror("Sửa profile", str(exc), parent=self)
+            showerror("Sửa profile", str(exc), parent=self)
             raise
 
     def _delete_single(self, profile_id):
@@ -1113,7 +1161,7 @@ class LauncherApp(ctk.CTk):
         except StopIteration:
             return
 
-        if not messagebox.askyesno(
+        if not askyesno(
             "Xóa profile",
             (
                 f"Xóa profile “{profile.profile_name}”?\n\n"
@@ -1140,7 +1188,7 @@ class LauncherApp(ctk.CTk):
             self._refresh()
 
         except (ValueError, OSError) as exc:
-            messagebox.showerror("Xóa profile", str(exc), parent=self)
+            showerror("Xóa profile", str(exc), parent=self)
 
     def _delete_selected(self):
         ids = [
@@ -1153,7 +1201,7 @@ class LauncherApp(ctk.CTk):
             self._log("App", "WARN", "Chưa chọn profile để xóa")
             return
 
-        if not messagebox.askyesno(
+        if not askyesno(
             "Xóa nhiều profile",
             (
                 f"Xóa {len(ids)} profile đã chọn?\n\n"
@@ -1179,7 +1227,7 @@ class LauncherApp(ctk.CTk):
         self._refresh()
 
         if failed:
-            messagebox.showwarning(
+            showwarning(
                 "Xóa profile",
                 "\n".join(failed),
                 parent=self,
@@ -1236,7 +1284,7 @@ class LauncherApp(ctk.CTk):
             self._run_creation(profile, source, repair=False)
 
         except (ValueError, OSError) as exc:
-            messagebox.showerror("Tạo profile", str(exc), parent=self)
+            showerror("Tạo profile", str(exc), parent=self)
 
     def _run_creation(self, profile, source, repair):
         cancel = threading.Event()
@@ -1303,7 +1351,7 @@ class LauncherApp(ctk.CTk):
         try:
             self._continue_login_for(self._selected_profile())
         except (ValueError, OSError, RuntimeError) as exc:
-            messagebox.showerror("Mở game", str(exc), parent=self)
+            showerror("Mở game", str(exc), parent=self)
 
     def _continue_login_for(self, profile_id):
         try:
@@ -1315,7 +1363,7 @@ class LauncherApp(ctk.CTk):
             self._refresh()
 
         except (ValueError, OSError) as exc:
-            messagebox.showerror("Mở game", str(exc), parent=self)
+            showerror("Mở game", str(exc), parent=self)
 
     def _open_for_login(self, profile):
         cancel = threading.Event()
@@ -1368,7 +1416,7 @@ class LauncherApp(ctk.CTk):
             )
 
         except (ValueError, OSError) as exc:
-            messagebox.showerror("Xác nhận đăng nhập", str(exc), parent=self)
+            showerror("Xác nhận đăng nhập", str(exc), parent=self)
 
     # ------------------------------------------------------------------
     # START / STOP
@@ -1416,7 +1464,7 @@ class LauncherApp(ctk.CTk):
             self._start_profile_ids(ids)
 
         except (ValueError, OSError, RuntimeError) as exc:
-            messagebox.showerror("Start profiles", str(exc), parent=self)
+            showerror("Start profiles", str(exc), parent=self)
 
     def _start_single(self, profile_id):
         try:
@@ -1425,7 +1473,7 @@ class LauncherApp(ctk.CTk):
             self._start_profile_ids((profile_id,))
 
         except (ValueError, OSError, RuntimeError) as exc:
-            messagebox.showerror("Start profile", str(exc), parent=self)
+            showerror("Start profile", str(exc), parent=self)
 
     def _stop_selected(self):
         if not self.checked:
