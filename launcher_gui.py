@@ -2234,6 +2234,78 @@ class LauncherApp(ctk.CTk):
             ids
         )
 
+    @staticmethod
+    def _running_profile_games(
+        profiles,
+    ):
+        """Return configured profiles that already have a game process open."""
+        import psutil
+
+        profile_roots = [
+            (
+                profile.profile_id,
+                Path(
+                    profile.game_path
+                ).resolve(),
+            )
+            for profile in profiles
+        ]
+        running = []
+
+        for process in psutil.process_iter(
+            [
+                "name",
+                "exe",
+            ]
+        ):
+            try:
+                if (
+                    str(
+                        process.info.get(
+                            "name"
+                        )
+                        or ""
+                    ).casefold()
+                    != "thienmenhlachong.exe"
+                ):
+                    continue
+
+                executable = process.info.get(
+                    "exe"
+                )
+
+                if not executable:
+                    continue
+
+                executable = Path(
+                    executable
+                ).resolve()
+
+                for (
+                    profile_id,
+                    root,
+                ) in profile_roots:
+                    if executable.is_relative_to(
+                        root
+                    ):
+                        running.append(
+                            profile_id
+                        )
+                        break
+
+            except (
+                psutil.Error,
+                OSError,
+                ValueError,
+            ):
+                continue
+
+        return tuple(
+            dict.fromkeys(
+                running
+            )
+        )
+
     def _login_accounts(
         self,
         profile_ids,
@@ -2260,6 +2332,29 @@ class LauncherApp(ctk.CTk):
                     "Không thể Login account mới khi bot đang chạy profile khác. "
                     "Auth game dùng chung Registry Windows; hãy Stop toàn bộ trước "
                     "để tránh account của profile này đè profile khác."
+                ),
+                "warning",
+            )
+            return
+
+        open_games = self._running_profile_games(
+            self.controller.profiles
+        )
+
+        if open_games:
+            shown = ", ".join(
+                open_games[:4]
+            )
+            suffix = (
+                ""
+                if len(open_games) <= 4
+                else f" +{len(open_games) - 4}"
+            )
+            self._notify(
+                (
+                    "Đang có tab game mở: "
+                    f"{shown}{suffix}. Đóng các tab game trước khi Login hàng loạt. "
+                    "Đây là bắt buộc vì auth của game dùng chung Registry Windows."
                 ),
                 "warning",
             )
@@ -2461,6 +2556,13 @@ class LauncherApp(ctk.CTk):
             updated = None
 
             try:
+                post_log(
+                    (
+                        "Auto login isolated: "
+                        f"account={credentials.username!r} "
+                        f"server={credentials.server!r}"
+                    )
+                )
                 self.after(
                     0,
                     self._status,
@@ -2605,10 +2707,26 @@ class LauncherApp(ctk.CTk):
                         self._close_login_process(
                             context
                         )
+                    except Exception as exc:
+                        post_log(
+                            (
+                                "Auto login cleanup warning: "
+                                f"{exc}"
+                            )
+                        )
                     finally:
                         # Clear only after the old game process is gone. Some
                         # clients write Registry again while shutting down.
-                        clear_current_auth_values()
+                        try:
+                            clear_current_auth_values()
+                        except Exception as exc:
+                            post_log(
+                                (
+                                    "Registry cleanup warning: "
+                                    f"{exc}"
+                                )
+                            )
+
                         context.window_handle = None
                         context.process_id = None
 
