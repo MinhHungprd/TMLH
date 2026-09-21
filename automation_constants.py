@@ -14,6 +14,18 @@ SIGNAL_2 = (742, 437, 45, 24)
 SIGNAL_3 = (392, 389, 75, 35)
 BOSS_HP = (375, 8, 66, 22)
 
+# Lightweight boss-alive marker added from the captured asset:
+# assets/asset__x443_y27_w12_h18.png
+BOSS_ALIVE_MARKER = (443, 27, 12, 18)
+BOSS_ALIVE_ASSET = "asset__x443_y27_w12_h18.png"
+BOSS_ALIVE_MATCH_PADDING = 4
+BOSS_ALIVE_MATCH_THRESHOLD = 0.82
+BOSS_ALIVE_FALLBACK_MISSES = 3
+
+# One ROI covers both the existing HP digits and the padded alive marker.
+# This keeps boss detection at one screen capture per scan.
+BOSS_SCAN_ROI = (375, 8, 84, 41)
+
 GAME_START_WAIT = 10.0
 IN_GAME_CONFIRM_SECONDS = 3.0
 
