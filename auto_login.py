@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 
 from automation_constants import SIGNAL_1, SIGNAL_3
-from boss.enter_boss import has_gameplay_socket
 from game_state import GameStateDetector
 from input_manager import InputManager
 from profile_credentials import (
@@ -43,7 +42,6 @@ LOGIN_SECOND_SIGNAL_TIMEOUT = 25.0
 # After submit, the Start button normally appears quickly. Keep this optional
 # window short so a missing S3 does not delay auth confirmation for 12s.
 LOGIN_START_OPTIONAL_TIMEOUT = 4.0
-LOGIN_GAMEPLAY_READY_TIMEOUT = 25.0
 LOGIN_SCAN_INTERVAL = 0.35
 LOGIN_POST_SUBMIT_SETTLE = 0.35
 
@@ -58,7 +56,6 @@ class AutoLoginRunner:
         now=None,
         on_status=None,
         on_log=None,
-        gameplay_ready=None,
     ):
         self.detector = (
             detector
@@ -86,10 +83,6 @@ class AutoLoginRunner:
         self.on_log = (
             on_log
             or (lambda _message: None)
-        )
-        self.gameplay_ready = (
-            gameplay_ready
-            or has_gameplay_socket
         )
 
     @staticmethod
@@ -537,114 +530,21 @@ class AutoLoginRunner:
             optional=True,
         )
 
-        if start is not None:
-            self._click(
-                context,
-                roi_center(
-                    SIGNAL_3
-                ),
-            )
+        if start is None:
             self.on_log(
-                "Auto login: đã bấm Bắt đầu"
+                "Auto login: không thấy nút Bắt đầu, bỏ qua bước tùy chọn"
             )
-        else:
-            self.on_log(
-                "Auto login: chưa thấy nút Bắt đầu, tiếp tục chờ gameplay socket"
-            )
+            return False
 
-        # Do not mark/save the profile as successfully logged in until the
-        # exact game PID has opened gameplay :1002. Previously Registry auth
-        # alone could mark READY while the client was still on a login/menu
-        # screen, causing the next normal Start to hang at
-        # WAITING_GAMEPLAY_SOCKET.
-        self.on_status(
-            "LOGIN_WAITING_GAMEPLAY"
+        self._click(
+            context,
+            roi_center(
+                SIGNAL_3
+            ),
         )
         self.on_log(
-            "Auto login: chờ gameplay socket :1002"
+            "Auto login: đã bấm Bắt đầu"
         )
 
-        deadline = (
-            self.now()
-            + LOGIN_GAMEPLAY_READY_TIMEOUT
-        )
-
-        while (
-            self.now() < deadline
-            and not context.stop_event.is_set()
-        ):
-            if self.gameplay_ready(
-                context.process_id
-            ):
-                self.on_log(
-                    "Auto login: gameplay socket :1002 đã sẵn sàng"
-                )
-                return True
-
-            self._prepare_window(
-                context
-            )
-
-            # Keep handling intro/start overlays while waiting for gameplay.
-            checks = (
-                self.detector
-                .check_signals(
-                    context
-                )
-            )
-
-            skip = checks[1]
-            start = checks[2]
-
-            if skip.detected:
-                if (
-                    skip.coordinates
-                    is not None
-                ):
-                    self.input.click_center(
-                        context.window_handle,
-                        skip.coordinates,
-                        context.stop_event,
-                        context.process_id,
-                    )
-                    self.on_log(
-                        "Auto login: phát hiện giới thiệu → Skip"
-                    )
-                    self._wait_short(
-                        context,
-                        0.35,
-                    )
-                    continue
-
-            if start.detected:
-                self._click(
-                    context,
-                    roi_center(
-                        SIGNAL_3
-                    ),
-                )
-                self.on_log(
-                    "Auto login: phát hiện nút Bắt đầu → bấm"
-                )
-                self._wait_short(
-                    context,
-                    0.35,
-                )
-                continue
-
-            self._wait_short(
-                context,
-                LOGIN_SCAN_INTERVAL,
-            )
-
-        if context.stop_event.is_set():
-            raise InterruptedError(
-                "Đã dừng auto login"
-            )
-
-        raise TimeoutError(
-            (
-                "Đăng nhập chưa hoàn tất: không thấy gameplay socket "
-                f":1002 trong {LOGIN_GAMEPLAY_READY_TIMEOUT:.0f}s"
-            )
+        return True
         )
