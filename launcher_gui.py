@@ -582,7 +582,7 @@ class LauncherApp(ctk.CTk):
     def _build_create_bar(self):
         card = CompactCard(
             self,
-            height=132,
+            height=58,
         )
         card.grid(
             row=2,
@@ -593,337 +593,210 @@ class LauncherApp(ctk.CTk):
         )
         card.grid_propagate(False)
         card.grid_columnconfigure(
-            0,
-            minsize=76,
-            weight=0,
-        )
-        card.grid_columnconfigure(
             1,
             weight=1,
         )
-        card.grid_columnconfigure(
-            2,
-            weight=1,
-        )
-        card.grid_columnconfigure(
-            3,
-            minsize=142,
-            weight=0,
-        )
-
-        ctk.CTkLabel(
-            card,
-            text="1. Tạo",
-            text_color=COLORS["cyan"],
-            font=ctk.CTkFont(
-                size=9,
-                weight="bold",
-            ),
-            anchor="w",
-        ).grid(
-            row=0,
-            column=0,
-            padx=(10, 4),
-            pady=(7, 3),
-            sticky="w",
-        )
-
-        self.profile_entry = ctk.CTkEntry(
-            card,
-            textvariable=self.profile_name,
-            height=27,
-            fg_color=COLORS["input"],
-            border_color=COLORS["border_bright"],
-            placeholder_text="Tên profile mới...",
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=8),
-        )
-        self.profile_entry.grid(
-            row=0,
-            column=1,
-            columnspan=2,
-            sticky="ew",
-            padx=3,
-            pady=(6, 3),
-        )
 
         ctk.CTkButton(
             card,
-            text="Tạo profile",
-            width=86,
-            height=27,
-            fg_color=COLORS["blue"],
-            hover_color=COLORS["blue_hover"],
-            command=self._create,
-        ).grid(
-            row=0,
-            column=3,
-            sticky="ew",
-            padx=(4, 10),
-            pady=(6, 3),
-        )
-
-        ctk.CTkLabel(
-            card,
-            text="2. Login",
-            text_color=COLORS["green"],
-            font=ctk.CTkFont(
-                size=9,
-                weight="bold",
-            ),
-            anchor="w",
-        ).grid(
-            row=1,
-            column=0,
-            padx=(10, 4),
-            pady=3,
-            sticky="w",
-        )
-
-        self.login_profile_combo = ctk.CTkComboBox(
-            card,
-            variable=self.login_profile,
-            values=(),
-            height=27,
-            fg_color=COLORS["input"],
-            border_color=COLORS["border_bright"],
-            button_color=COLORS["surface_soft"],
-            button_hover_color=COLORS["blue_hover"],
-            dropdown_fg_color=COLORS["surface_alt"],
-            dropdown_hover_color=COLORS["surface_soft"],
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=8),
-            dropdown_font=ctk.CTkFont(size=8),
-            command=self._choose_login_profile,
-        )
-        self.login_profile_combo.grid(
-            row=1,
-            column=1,
-            sticky="ew",
-            padx=3,
-            pady=3,
-        )
-
-        self.login_server_combo = ctk.CTkComboBox(
-            card,
-            variable=self.login_server,
-            values=tuple(
-                SERVER_LABELS.values()
-            ),
-            height=27,
-            fg_color=COLORS["input"],
-            border_color=COLORS["border_bright"],
-            button_color=COLORS["surface_soft"],
-            button_hover_color=COLORS["blue_hover"],
-            dropdown_fg_color=COLORS["surface_alt"],
-            dropdown_hover_color=COLORS["surface_soft"],
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=8),
-            dropdown_font=ctk.CTkFont(size=8),
-        )
-        self.login_server_combo.grid(
-            row=1,
-            column=2,
-            sticky="ew",
-            padx=3,
-            pady=3,
-        )
-
-        ctk.CTkLabel(
-            card,
-            text="Chọn profile + server",
-            text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=8),
-            anchor="w",
-        ).grid(
-            row=1,
-            column=3,
-            sticky="w",
-            padx=(6, 10),
-            pady=3,
-        )
-
-        ctk.CTkLabel(
-            card,
-            text="TK / MK",
-            text_color=COLORS["muted"],
-            font=ctk.CTkFont(
-                size=8,
-                weight="bold",
-            ),
-            anchor="w",
-        ).grid(
-            row=2,
-            column=0,
-            padx=(10, 4),
-            pady=3,
-            sticky="w",
-        )
-
-        self.login_username_entry = ctk.CTkEntry(
-            card,
-            textvariable=self.login_username,
-            height=27,
-            fg_color=COLORS["input"],
-            border_color=COLORS["border_bright"],
-            placeholder_text="Tài khoản",
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=8),
-        )
-        self.login_username_entry.grid(
-            row=2,
-            column=1,
-            sticky="ew",
-            padx=3,
-            pady=3,
-        )
-
-        self.login_password_entry = ctk.CTkEntry(
-            card,
-            textvariable=self.login_password,
-            height=27,
-            fg_color=COLORS["input"],
-            border_color=COLORS["border_bright"],
-            placeholder_text="Mật khẩu",
-            show="•",
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=8),
-        )
-        self.login_password_entry.grid(
-            row=2,
-            column=2,
-            sticky="ew",
-            padx=3,
-            pady=3,
-        )
-
-        ctk.CTkButton(
-            card,
-            text="▶ Tự đăng nhập + lưu",
-            height=27,
+            text="+ Nhập tài khoản",
+            width=132,
+            height=34,
             fg_color=COLORS["green"],
             hover_color=COLORS["green_hover"],
             text_color=COLORS["black"],
             font=ctk.CTkFont(
-                size=8,
+                size=12,
                 weight="bold",
             ),
-            command=self._auto_login_selected,
+            command=self._open_account_import,
         ).grid(
-            row=2,
-            column=3,
-            sticky="ew",
-            padx=(4, 10),
-            pady=3,
-        )
-
-        ctk.CTkLabel(
-            card,
-            text="Thủ công",
-            text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=8),
-            anchor="w",
-        ).grid(
-            row=3,
+            row=0,
             column=0,
-            padx=(10, 4),
-            pady=(2, 7),
-            sticky="w",
+            padx=(10, 8),
+            pady=11,
         )
 
-        ctk.CTkLabel(
+        self.account_summary = ctk.CTkLabel(
             card,
             text=(
-                "Tự động đã bao gồm xác nhận auth."
+                "Tài khoản tự tạo profile riêng. "
+                "Xóa tài khoản sẽ xóa luôn clone."
             ),
-            text_color=COLORS["muted_dark"],
-            font=ctk.CTkFont(size=7),
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(size=11),
             anchor="w",
-        ).grid(
-            row=3,
+        )
+        self.account_summary.grid(
+            row=0,
             column=1,
-            columnspan=2,
-            sticky="w",
-            padx=3,
-            pady=(2, 7),
+            sticky="ew",
+            padx=4,
         )
 
-        manual = ctk.CTkFrame(
+        ctk.CTkButton(
             card,
+            text="Proxy",
+            width=68,
+            height=30,
+            fg_color=COLORS["surface_soft"],
+            hover_color=COLORS["border_bright"],
+            font=ctk.CTkFont(
+                size=11,
+                weight="bold",
+            ),
+            command=self._open_proxy_dialog,
+        ).grid(
+            row=0,
+            column=2,
+            padx=(6, 10),
+        )
+
+    def _build_notice_bar(self):
+        self.notice_card = ctk.CTkFrame(
+            self,
+            height=42,
+            fg_color=COLORS["surface_alt"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=9,
+        )
+        self.notice_card.grid(
+            row=3,
+            column=0,
+            sticky="ew",
+            padx=8,
+            pady=3,
+        )
+        self.notice_card.grid_propagate(False)
+        self.notice_card.grid_columnconfigure(
+            0,
+            weight=1,
+        )
+
+        self.notice_label = ctk.CTkLabel(
+            self.notice_card,
+            text="Sẵn sàng.",
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(
+                size=11,
+                weight="bold",
+            ),
+            anchor="w",
+        )
+        self.notice_label.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=(12, 6),
+            pady=9,
+        )
+
+        self.notice_actions = ctk.CTkFrame(
+            self.notice_card,
             fg_color="transparent",
         )
-        manual.grid(
-            row=3,
-            column=3,
+        self.notice_actions.grid(
+            row=0,
+            column=1,
             sticky="e",
             padx=(4, 10),
-            pady=(2, 7),
-        )
-
-        ctk.CTkButton(
-            manual,
-            text="Mở tay",
-            width=58,
-            height=23,
-            fg_color=COLORS["surface_soft"],
-            hover_color=COLORS["border_bright"],
-            command=self._continue_login,
-        ).pack(
-            side="left",
-            padx=(0, 3),
-        )
-
-        ctk.CTkButton(
-            manual,
-            text="Xác nhận",
-            width=66,
-            height=23,
-            fg_color=COLORS["surface_soft"],
-            hover_color=COLORS["border_bright"],
-            command=self._confirm_login,
-        ).pack(
-            side="left",
+            pady=6,
         )
 
     def _build_profile_panel(self):
         panel = CompactCard(self)
-        panel.grid(row=3, column=0, sticky="nsew", padx=8, pady=3)
-        panel.grid_columnconfigure(0, weight=1)
-        panel.grid_rowconfigure(2, weight=1)
+        panel.grid(
+            row=4,
+            column=0,
+            sticky="nsew",
+            padx=8,
+            pady=3,
+        )
+        panel.grid_columnconfigure(
+            0,
+            weight=1,
+        )
+        panel.grid_rowconfigure(
+            2,
+            weight=1,
+        )
 
-        top = ctk.CTkFrame(panel, fg_color="transparent", height=42)
-        top.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 4))
-        top.grid_columnconfigure(0, weight=1)
+        top = ctk.CTkFrame(
+            panel,
+            fg_color="transparent",
+            height=42,
+        )
+        top.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=10,
+            pady=(8, 4),
+        )
+        top.grid_columnconfigure(
+            1,
+            weight=1,
+        )
 
         self.profile_title = ctk.CTkLabel(
             top,
-            text="👥  Danh sách profile (0)",
+            text="Tài khoản (0)",
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=9, weight="bold"),
+            font=ctk.CTkFont(
+                size=13,
+                weight="bold",
+            ),
         )
-        self.profile_title.grid(row=0, column=0, sticky="w")
+        self.profile_title.grid(
+            row=0,
+            column=0,
+            sticky="w",
+            padx=(2, 8),
+        )
 
-        ctk.CTkLabel(
+        self.search_entry = ctk.CTkEntry(
             top,
-            text="Sort",
-            text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=8),
-        ).grid(row=0, column=1, padx=(8, 4))
+            textvariable=self.search_text,
+            height=30,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            placeholder_text="Tìm tài khoản...",
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=12),
+        )
+        self.search_entry.grid(
+            row=0,
+            column=1,
+            sticky="ew",
+            padx=4,
+        )
+        self.search_text.trace_add(
+            "write",
+            lambda *_args: self._refresh(),
+        )
 
         self.sort_combo = ctk.CTkComboBox(
             top,
             variable=self.sort_mode,
             values=("A→Z", "Z→A", "TT"),
-            width=70,
-            height=24,
+            width=78,
+            height=30,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             dropdown_fg_color=COLORS["surface_alt"],
+            dropdown_hover_color=COLORS["surface_soft"],
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=8),
+            font=ctk.CTkFont(size=11),
+            dropdown_font=ctk.CTkFont(size=11),
             command=lambda _value: self._refresh(),
         )
-        self.sort_combo.grid(row=0, column=2, sticky="e")
+        self.sort_combo.grid(
+            row=0,
+            column=2,
+            sticky="e",
+            padx=(5, 2),
+        )
 
         header = ctk.CTkFrame(
             panel,
@@ -931,17 +804,28 @@ class LauncherApp(ctk.CTk):
             corner_radius=8,
             height=34,
         )
-        header.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
+        header.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=8,
+            pady=(0, 4),
+        )
         header.grid_propagate(False)
 
         columns = (
             ("", PROFILE_COLUMN_WIDTHS[0]),
-            ("Profile / TT", PROFILE_COLUMN_WIDTHS[1]),
-            ("Boss", PROFILE_COLUMN_WIDTHS[2]),
-            ("Size", PROFILE_COLUMN_WIDTHS[3]),
-            ("Ctrl", PROFILE_COLUMN_WIDTHS[4]),
+            ("Tài khoản", PROFILE_COLUMN_WIDTHS[1]),
+            ("SV", PROFILE_COLUMN_WIDTHS[2]),
+            ("Boss", PROFILE_COLUMN_WIDTHS[3]),
+            ("Size", PROFILE_COLUMN_WIDTHS[4]),
+            ("Trạng thái", PROFILE_COLUMN_WIDTHS[5]),
+            ("", PROFILE_COLUMN_WIDTHS[6]),
         )
-        for index, (label, width) in enumerate(columns):
+
+        for index, (label, width) in enumerate(
+            columns
+        ):
             header.grid_columnconfigure(
                 index,
                 minsize=width,
@@ -951,9 +835,18 @@ class LauncherApp(ctk.CTk):
                 header,
                 text=label,
                 text_color=COLORS["muted"],
-                font=ctk.CTkFont(size=8, weight="bold"),
+                font=ctk.CTkFont(
+                    size=11,
+                    weight="bold",
+                ),
                 anchor="w",
-            ).grid(row=0, column=index, sticky="ew", padx=3, pady=8)
+            ).grid(
+                row=0,
+                column=index,
+                sticky="ew",
+                padx=3,
+                pady=7,
+            )
 
         self.rows_frame = ctk.CTkScrollableFrame(
             panel,
@@ -962,117 +855,259 @@ class LauncherApp(ctk.CTk):
             scrollbar_button_color=COLORS["surface_soft"],
             scrollbar_button_hover_color=COLORS["border_bright"],
         )
-        self.rows_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=1)
-        self.rows_frame.grid_columnconfigure(0, weight=1)
+        self.rows_frame.grid(
+            row=2,
+            column=0,
+            sticky="nsew",
+            padx=4,
+            pady=1,
+        )
+        self.rows_frame.grid_columnconfigure(
+            0,
+            weight=1,
+        )
 
-        bulk = ctk.CTkFrame(panel, fg_color="transparent", height=42)
-        bulk.grid(row=3, column=0, sticky="ew", padx=8, pady=(2, 6))
-        bulk.grid_columnconfigure(0, weight=1)
+        bulk = ctk.CTkFrame(
+            panel,
+            fg_color="transparent",
+            height=38,
+        )
+        bulk.grid(
+            row=3,
+            column=0,
+            sticky="ew",
+            padx=10,
+            pady=(2, 6),
+        )
+        bulk.grid_columnconfigure(
+            0,
+            weight=1,
+        )
 
         self.selected_label = ctk.CTkLabel(
             bulk,
             text="Đã chọn 0",
-            text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=8),
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(
+                size=11,
+                weight="bold",
+            ),
         )
-        self.selected_label.grid(row=0, column=0, sticky="w")
+        self.selected_label.grid(
+            row=0,
+            column=0,
+            sticky="w",
+        )
 
         ctk.CTkButton(
             bulk,
-            text="Tất cả",
-            width=50,
-            height=22,
+            text="Chọn tất cả",
+            width=82,
+            height=25,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
+            font=ctk.CTkFont(size=11),
             command=self._select_all,
-        ).grid(row=0, column=1, padx=3)
+        ).grid(
+            row=0,
+            column=1,
+            padx=3,
+        )
 
         ctk.CTkButton(
             bulk,
-            text="Bỏ",
-            width=34,
-            height=22,
+            text="Bỏ chọn",
+            width=68,
+            height=25,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
+            font=ctk.CTkFont(size=11),
             command=self._clear_selection,
-        ).grid(row=0, column=2, padx=3)
-
-        ctk.CTkButton(
-            bulk,
-            text="Xóa",
-            width=38,
-            height=22,
-            fg_color="#35121B",
-            hover_color=COLORS["red_hover"],
-            text_color=COLORS["red"],
-            command=self._delete_selected,
-        ).grid(row=0, column=3, padx=(3, 0))
+        ).grid(
+            row=0,
+            column=2,
+            padx=3,
+        )
 
     def _build_action_bar(self):
-        bar = CompactCard(self, height=42)
-        bar.grid(row=4, column=0, sticky="ew", padx=8, pady=3)
+        bar = CompactCard(
+            self,
+            height=82,
+        )
+        bar.grid(
+            row=5,
+            column=0,
+            sticky="ew",
+            padx=8,
+            pady=3,
+        )
         bar.grid_propagate(False)
-        bar.grid_columnconfigure(0, weight=1)
 
-        actions = ctk.CTkFrame(bar, fg_color="transparent")
-        actions.grid(row=0, column=0, pady=8)
+        for index in range(8):
+            bar.grid_columnconfigure(
+                index,
+                weight=1
+                if index in (1, 3)
+                else 0,
+            )
 
-        ctk.CTkButton(
-            actions,
-            text="▶ Start",
-            width=70,
-            height=24,
-            fg_color=COLORS["cyan"],
-            hover_color=COLORS["blue"],
-            text_color=COLORS["black"],
-            font=ctk.CTkFont(size=9, weight="bold"),
-            command=self._start_selected,
-        ).pack(side="left", padx=2)
+        ctk.CTkLabel(
+            bar,
+            text="Boss",
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(
+                size=11,
+                weight="bold",
+            ),
+        ).grid(
+            row=0,
+            column=0,
+            padx=(10, 3),
+            pady=(8, 3),
+        )
 
-        ctk.CTkButton(
-            actions,
-            text="■ Stop",
-            width=64,
-            height=24,
-            fg_color=COLORS["surface_soft"],
-            hover_color=COLORS["red_hover"],
+        self.batch_boss_combo = ctk.CTkComboBox(
+            bar,
+            variable=self.batch_boss,
+            values=tuple(
+                BOSS_LABELS.get(key, key)
+                for key in BOSSES
+            ),
+            height=28,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            dropdown_fg_color=COLORS["surface_alt"],
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=9, weight="bold"),
-            command=self._stop_selected,
-        ).pack(side="left", padx=2)
+            font=ctk.CTkFont(size=11),
+            dropdown_font=ctk.CTkFont(size=11),
+        )
+        self.batch_boss_combo.grid(
+            row=0,
+            column=1,
+            sticky="ew",
+            padx=3,
+            pady=(8, 3),
+        )
+
+        ctk.CTkLabel(
+            bar,
+            text="Size",
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(
+                size=11,
+                weight="bold",
+            ),
+        ).grid(
+            row=0,
+            column=2,
+            padx=(6, 3),
+            pady=(8, 3),
+        )
+
+        self.batch_size_combo = ctk.CTkComboBox(
+            bar,
+            variable=self.batch_size,
+            values=SIZES,
+            height=28,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            dropdown_fg_color=COLORS["surface_alt"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=11),
+            dropdown_font=ctk.CTkFont(size=11),
+        )
+        self.batch_size_combo.grid(
+            row=0,
+            column=3,
+            sticky="ew",
+            padx=3,
+            pady=(8, 3),
+        )
+
+        self.layout_combo = ctk.CTkComboBox(
+            bar,
+            variable=self.layout_mode_var,
+            values=("Xếp", "Chồng"),
+            width=84,
+            height=28,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            dropdown_fg_color=COLORS["surface_alt"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=11),
+            dropdown_font=ctk.CTkFont(size=11),
+            command=self._layout_mode_changed,
+        )
+        self.layout_combo.grid(
+            row=0,
+            column=4,
+            padx=(6, 3),
+            pady=(8, 3),
+        )
 
         ctk.CTkButton(
-            actions,
-            text="▣ Xếp",
-            width=74,
-            height=24,
+            bar,
+            text="Áp dụng",
+            width=76,
+            height=28,
             fg_color=COLORS["purple"],
             hover_color=COLORS["purple_hover"],
-            font=ctk.CTkFont(size=9, weight="bold"),
-            command=self._arrange_windows,
-        ).pack(side="left", padx=2)
+            font=ctk.CTkFont(
+                size=11,
+                weight="bold",
+            ),
+            command=self._apply_batch_options,
+        ).grid(
+            row=0,
+            column=5,
+            padx=3,
+            pady=(8, 3),
+        )
 
-        ctk.CTkButton(
-            actions,
-            text="▤ Chồng",
-            width=80,
-            height=24,
-            fg_color=COLORS["surface_soft"],
-            hover_color=COLORS["border_bright"],
-            font=ctk.CTkFont(size=9, weight="bold"),
-            command=self._stack_windows,
-        ).pack(side="left", padx=2)
+        actions = ctk.CTkFrame(
+            bar,
+            fg_color="transparent",
+        )
+        actions.grid(
+            row=1,
+            column=0,
+            columnspan=8,
+            sticky="ew",
+            padx=8,
+            pady=(3, 8),
+        )
 
-        ctk.CTkButton(
-            actions,
-            text="⇄ Proxy",
-            width=78,
-            height=24,
-            fg_color=COLORS["surface_soft"],
-            hover_color=COLORS["border_bright"],
-            font=ctk.CTkFont(size=9, weight="bold"),
-            command=self._open_proxy_dialog,
-        ).pack(side="left", padx=2)
+        for text_value, color, command in (
+            ("▶ Login", COLORS["green"], self._login_selected_accounts),
+            ("▶ Start", COLORS["cyan"], self._start_selected),
+            ("■ Stop", COLORS["surface_soft"], self._stop_selected),
+            ("Xóa", "#35121B", self._delete_selected),
+        ):
+            ctk.CTkButton(
+                actions,
+                text=text_value,
+                height=28,
+                fg_color=color,
+                hover_color=COLORS["border_bright"],
+                text_color=(
+                    COLORS["black"]
+                    if color in (
+                        COLORS["green"],
+                        COLORS["cyan"],
+                    )
+                    else COLORS["text"]
+                ),
+                font=ctk.CTkFont(
+                    size=11,
+                    weight="bold",
+                ),
+                command=command,
+            ).pack(
+                side="left",
+                fill="x",
+                expand=True,
+                padx=3,
+            )
 
     def _open_proxy_dialog(self):
         try:
