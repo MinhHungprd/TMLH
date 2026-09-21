@@ -39,6 +39,8 @@ STATUS_COLORS = {
     "waiting gameplay socket": (COLORS["amber"], "#412B0A"),
     "waiting startup": (COLORS["amber"], "#412B0A"),
     "waiting login": (COLORS["amber"], "#412B0A"),
+    "chưa đăng nhập": (COLORS["amber"], "#412B0A"),
+    "đăng nhập thủ công": (COLORS["purple"], "#291C4C"),
     "login select server": (COLORS["purple"], "#291C4C"),
     "login enter credentials": (COLORS["purple"], "#291C4C"),
     "login submitting": (COLORS["amber"], "#412B0A"),
