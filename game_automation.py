@@ -693,11 +693,9 @@ class AutomationWorker:
                 # ======================================
                 # CHECK BOSS
                 #
-                # Không thấy boss liên tục >= 3 giây
-                # => xác nhận boss chết.
-                #
-                # Chỉ cần OCR hoặc visual detect lại
-                # => reset timer chết ngay.
+                # Asset là tín hiệu chính. Miss 3 scan liên tiếp mới mở OCR
+                # fallback. Nếu cả hai vẫn không thấy boss liên tục >=3 giây
+                # thì xác nhận boss chết.
                 # ======================================
 
                 self.context.boss_dead_streak = 0
@@ -785,7 +783,7 @@ class AutomationWorker:
                         break
 
                     # ==================================
-                    # OCR đúng MỘT lần / chu kỳ
+                    # Asset scan; OCR chỉ chạy khi fallback cần thiết.
                     # ==================================
 
                     text = (
@@ -904,7 +902,7 @@ class AutomationWorker:
                         # detect boss sống.
                         #
                         # Nếu vào map mà boss vốn đã chết,
-                        # sau 3 giây liên tục không thấy HP
+                        # sau 3 giây liên tục không có tín hiệu hợp lệ
                         # vẫn phải out boss.
                         if (
                             dead_for
@@ -950,6 +948,15 @@ class AutomationWorker:
                         )
                     )
 
+                    alive_for = (
+                        0.0
+                        if boss_alive_since is None
+                        else (
+                            now
+                            - boss_alive_since
+                        )
+                    )
+
                     should_log_debug = (
                         not alive
                         or (
@@ -986,6 +993,8 @@ class AutomationWorker:
                                 f"cache_hit="
                                 f"{debug.get('cache_hit')} "
                                 f"final_alive={alive} "
+                                f"alive_for={alive_for:.1f}s/"
+                                f"{BOSS_ALIVE_SIGNAL_TIMEOUT_SECONDS:.0f}s "
                                 f"dead_streak="
                                 f"{self.context.boss_dead_streak} "
                                 f"dead_for="
