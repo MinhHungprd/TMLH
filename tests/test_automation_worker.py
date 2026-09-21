@@ -203,3 +203,97 @@ def test_game_lifecycle_treats_zero_size_without_replacement_as_transient():
             GameLifecycle().ensure_size(ctx)
             is None
         )
+
+
+
+def test_boss_alive_signal_over_five_minutes_forces_outboss():
+    class Clock:
+        def __init__(self):
+            self.value = 0.0
+
+        def now(self):
+            return self.value
+
+        def wait(self, seconds, event):
+            if event.is_set():
+                return True
+            self.value += seconds
+            return event.is_set()
+
+    class Lifecycle(FakeLifecycle):
+        def open(self, ctx):
+            return 202, 303, False
+
+    class NoStartupSignals:
+        def check_signals(self, ctx):
+            return []
+
+    class AlwaysAssetBoss:
+        def __init__(self):
+            self.last_debug = {}
+
+        def reset_cycle(self):
+            pass
+
+        def read_hp(self, ctx):
+            self.last_debug = {
+                "asset_alive": True,
+                "asset_score": 1.0,
+                "asset_miss_streak": 0,
+                "fallback_ocr": False,
+                "name_alive": False,
+            }
+            return ""
+
+        def is_alive(self, text):
+            return False
+
+    ctx = context()
+    clock = Clock()
+    states = []
+    commands = []
+    logs = []
+
+    def exit_boss(pid):
+        commands.append(
+            ("exit", pid)
+        )
+        ctx.stop_event.set()
+
+    worker = AutomationWorker(
+        ctx,
+        on_status=states.append,
+        on_log=logs.append,
+        lifecycle=Lifecycle(),
+        detector=NoStartupSignals(),
+        boss_detector=AlwaysAssetBoss(),
+        input_manager=InputManager(
+            lambda *args: None
+        ),
+        enter=lambda pid, kind: (
+            commands.append(
+                ("enter", pid, kind)
+            )
+        ),
+        exit=exit_boss,
+        wait=clock.wait,
+        now=clock.now,
+        gameplay_ready=lambda pid: True,
+        boss_scan_stagger=0,
+    )
+
+    worker.run()
+
+    assert (
+        "BOSS_SIGNAL_ERROR"
+        in states
+    )
+    assert (
+        ("exit", 202)
+        in commands
+    )
+    assert any(
+        "BOSS SIGNAL ERROR"
+        in message
+        for message in logs
+    )
