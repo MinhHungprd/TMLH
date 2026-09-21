@@ -9,14 +9,15 @@ from automation_constants import (
     SIGNAL_2,
     SIGNAL_3,
 )
-
+from perf_metrics import perf_timer
 from vision import (
     ScaledAssetCache,
     base_point_to_client,
     capture_client,
     expand_roi,
-    normalize_to_base,
+    normalize_roi_to_base,
     roi_center,
+    scale_roi,
 )
 
 CLICK_CENTER = "CLICK_CENTER"
@@ -39,17 +40,97 @@ class GameStateDetector:
     def __init__(self, matcher=None, assets_dir=None, capture=None):
         self.matcher = matcher
         self.capture = capture or capture_client
-        self.assets = ScaledAssetCache(assets_dir or __import__("pathlib").Path(__file__).resolve().parent / "assets")
+        self.assets = ScaledAssetCache(
+            assets_dir
+            or __import__("pathlib").Path(
+                __file__
+            ).resolve().parent
+            / "assets"
+        )
 
-    def inspect(self, name, roi, image=None, asset_name=None) -> SignalCheck:
-        detected = bool(self.matcher(name, roi) if self.matcher is not None else
-                        self._match(image, asset_name, roi))
+    def inspect(
+        self,
+        name,
+        roi,
+        image=None,
+        asset_name=None,
+    ) -> SignalCheck:
+        detected = bool(
+            self.matcher(name, roi)
+            if self.matcher is not None
+            else self._match(
+                image,
+                asset_name,
+                roi,
+            )
+        )
+
         if not detected:
-            return SignalCheck(False, None)
+            return SignalCheck(
+                False,
+                None,
+            )
+
         if name == "s1":
-            return SignalCheck(True, None)
+            return SignalCheck(
+                True,
+                None,
+            )
+
         x, y, w, h = roi
-        return SignalCheck(True, CLICK_CENTER, (x + w // 2, y + h // 2))
+
+        return SignalCheck(
+            True,
+            CLICK_CENTER,
+            (
+                x + w // 2,
+                y + h // 2,
+            ),
+        )
+
+    def _match_region(
+        self,
+        region,
+        asset_name,
+        search_roi,
+    ):
+        """
+        Match one small search region using the existing canonical template.
+
+        The native frame is cropped first and only the small padded search
+        area is resized back to canonical coordinates. This keeps the same
+        template, padding and 0.82 threshold without resizing the full frame.
+        """
+        template = self.assets.get(
+            asset_name,
+            BASE_WIDTH,
+            BASE_HEIGHT,
+        )
+
+        canonical_region = normalize_roi_to_base(
+            region,
+            search_roi,
+        )
+
+        if (
+            canonical_region.shape[0]
+            < template.shape[0]
+            or canonical_region.shape[1]
+            < template.shape[1]
+        ):
+            return False
+
+        result = cv2.matchTemplate(
+            canonical_region,
+            template,
+            cv2.TM_CCOEFF_NORMED,
+        )
+
+        score = float(
+            result.max()
+        )
+
+        return score >= 0.82
 
     def _match(
         self,
@@ -57,15 +138,8 @@ class GameStateDetector:
         asset_name,
         roi,
     ):
-        # image ở đây luôn là canonical 860x484.
-        template = self.assets.get(
-            asset_name,
-            BASE_WIDTH,
-            BASE_HEIGHT,
-        )
-
-        # Không match đúng khít ROI.
-        # Cho phép Unity lệch vài pixel sau scale/render.
+        # Compatibility path for callers/tests already providing a canonical
+        # 860x484 image.
         search_roi = expand_roi(
             roi,
             padding=6,
@@ -77,33 +151,38 @@ class GameStateDetector:
 
         region = image[
             y:y + h,
-            x:x + w
+            x:x + w,
         ]
 
-        if (
-            region.shape[0] < template.shape[0]
-            or region.shape[1] < template.shape[1]
-        ):
-            return False
-
-        result = cv2.matchTemplate(
+        return self._match_region(
             region,
-            template,
-            cv2.TM_CCOEFF_NORMED,
+            asset_name,
+            search_roi,
         )
 
-        score = float(result.max())
-
-        return score >= 0.82
-
     def check_signals(self, context):
+        with perf_timer(
+            "asset_scan_ms"
+        ):
+            return self._check_signals_impl(
+                context
+            )
+
+    def _check_signals_impl(
+        self,
+        context,
+    ):
         if self.matcher is not None:
-            client_width = context.window_width
-            client_height = context.window_height
+            client_width = (
+                context.window_width
+            )
+            client_height = (
+                context.window_height
+            )
 
             results = []
 
-            for name, asset, roi in self.SIGNALS:
+            for name, _asset, roi in self.SIGNALS:
                 detected = bool(
                     self.matcher(
                         name,
@@ -145,7 +224,7 @@ class GameStateDetector:
 
             return results
 
-        # Screenshot ở resolution THỰC TẾ.
+        # Capture once at the real client resolution.
         raw = self.capture(
             context.window_handle
         )
@@ -154,16 +233,62 @@ class GameStateDetector:
             raw.shape[:2]
         )
 
-        # Vision luôn chạy tại 860x484.
-        image = normalize_to_base(raw)
-
         results = []
 
         for name, asset, roi in self.SIGNALS:
-            detected = self._match(
-                image,
-                asset,
+            # Same canonical search area as before: signal ROI + 6px padding.
+            search_roi = expand_roi(
                 roi,
+                padding=6,
+                image_width=BASE_WIDTH,
+                image_height=BASE_HEIGHT,
+            )
+
+            # Crop only that search area from the native screenshot.
+            x, y, w, h = scale_roi(
+                search_roi,
+                actual_width,
+                actual_height,
+            )
+
+            x = max(
+                0,
+                min(
+                    x,
+                    actual_width - 1,
+                ),
+            )
+            y = max(
+                0,
+                min(
+                    y,
+                    actual_height - 1,
+                ),
+            )
+            w = max(
+                1,
+                min(
+                    w,
+                    actual_width - x,
+                ),
+            )
+            h = max(
+                1,
+                min(
+                    h,
+                    actual_height - y,
+                ),
+            )
+
+            region = raw[
+                y:y + h,
+                x:x + w,
+            ]
+
+            detected = self._match_region(
+                region,
+                asset,
+                search_roi,
             )
 
             if not detected:
@@ -184,10 +309,10 @@ class GameStateDetector:
                 )
                 continue
 
-            # ROI đang là hệ 860x484.
-            base_center = roi_center(roi)
+            base_center = roi_center(
+                roi
+            )
 
-            # Click phải chuyển trở lại client hiện tại.
             click = base_point_to_client(
                 base_center,
                 actual_width,
