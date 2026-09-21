@@ -1,3 +1,4 @@
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -117,6 +118,12 @@ def test_asset_must_miss_three_scans_before_ocr_fallback():
     )
     context = _context()
 
+    ocr_enabled = patch(
+        "boss_detector.BOSS_OCR_ENABLED",
+        True,
+    )
+    ocr_enabled.start()
+
     assert detector.read_hp(context) == ""
     assert detector.last_debug[
         "asset_miss_streak"
@@ -157,6 +164,7 @@ def test_asset_must_miss_three_scans_before_ocr_fallback():
         BOSS_ALIVE_MARKER,
         BOSS_NAME_ROI,
     ]
+    ocr_enabled.stop()
 
 
 def test_wrong_ocr_fallback_does_not_rescue_asset_miss():
@@ -185,9 +193,13 @@ def test_wrong_ocr_fallback_does_not_rescue_asset_miss():
         "trom_cho"
     )
 
-    detector.read_hp(context)
-    detector.read_hp(context)
-    detector.read_hp(context)
+    with patch(
+        "boss_detector.BOSS_OCR_ENABLED",
+        True,
+    ):
+        detector.read_hp(context)
+        detector.read_hp(context)
+        detector.read_hp(context)
 
     assert detector.last_debug[
         "asset_alive"
@@ -225,9 +237,13 @@ def test_missing_marker_asset_falls_back_to_ocr_immediately():
         ),
     )
 
-    assert detector.read_hp(
-        _context()
-    ) == "Trom cho"
+    with patch(
+        "boss_detector.BOSS_OCR_ENABLED",
+        True,
+    ):
+        assert detector.read_hp(
+            _context()
+        ) == "Trom cho"
 
     assert len(calls) == 1
     assert detector.last_debug[
@@ -347,3 +363,47 @@ def test_ocr_service_reports_missing_windows_executable():
             "Z:/definitely-missing/"
             "tesseract.exe"
         )
+
+
+
+def test_runtime_asset_only_mode_never_calls_ocr():
+    template = _marker_template()
+    calls = []
+
+    class OCR:
+        def read_text(self, image):
+            calls.append(image.shape)
+            return "Trom cho"
+
+    detector = BossDetector(
+        ocr=OCR(),
+        roi_capture=(
+            lambda hwnd, base_roi:
+            np.zeros(
+                (
+                    base_roi[3],
+                    base_roi[2],
+                ),
+                dtype=np.uint8,
+            )
+        ),
+        marker_template=template,
+    )
+
+    context = _context()
+
+    for _ in range(5):
+        assert detector.read_hp(
+            context
+        ) == ""
+
+    assert calls == []
+    assert detector.last_debug[
+        "chosen"
+    ] == "ocr_disabled"
+    assert detector.last_debug[
+        "fallback_ocr"
+    ] is False
+    assert detector.last_debug[
+        "asset_alive"
+    ] is False
