@@ -15,10 +15,21 @@ from tkinter import filedialog
 import customtkinter as ctk
 
 from app_settings import AppSettings, AppSettingsStorage
+from auto_login import AutoLoginRunner
 from automation_constants import RESOLUTIONS
 from boss.enter_boss import BOSSES
 from game_automation import AutomationWorker
-from profile_auth import save_profile_auth
+from profile_auth import (
+    clear_current_auth_values,
+    save_profile_auth,
+)
+from profile_credentials import (
+    LoginCredentials,
+    SERVER_KEYS,
+    SERVER_LABELS,
+    load_login_credentials,
+    save_login_credentials,
+)
 from profile_manager import MissingGameFilesError, ProfileManager
 from profile_models import ProfileRuntimeContext
 from profile_storage import ProfileStorage
@@ -34,6 +45,7 @@ from ui_dialogs import (
     askyesno,
     keep_above_game,
     showerror,
+    showinfo,
     showwarning,
 )
 from ui_components import CompactCard, EditProfileDialog, ProfileRow, PROFILE_COLUMN_WIDTHS
@@ -328,6 +340,11 @@ class LauncherApp(ctk.CTk):
 
         self.source = tk.StringVar(value=settings.game_source_path)
         self.profile_name = tk.StringVar()
+        self.login_username = tk.StringVar()
+        self.login_password = tk.StringVar()
+        self.login_server = tk.StringVar(
+            value=SERVER_LABELS["van_lang"]
+        )
         self.sort_mode = tk.StringVar(value="A→Z")
 
         self.statuses = {}
@@ -337,6 +354,7 @@ class LauncherApp(ctk.CTk):
         self.selected_profile_id = None
         self.window_layout_mode = "arrange"
         self._last_layout_signature = None
+        self._suspend_keep_above = False
 
         # Worker OCR/debug logs are batched onto the Tk thread instead of
         # scheduling one GUI callback per profile per second.
@@ -345,8 +363,8 @@ class LauncherApp(ctk.CTk):
         self._log_flush_after_id = None
 
         self.title(f"{APP_NAME} - Profile Bot")
-        self.geometry("480x620")
-        self.minsize(460, 560)
+        self.geometry("480x660")
+        self.minsize(460, 600)
         self.configure(fg_color=COLORS["bg"])
         self.attributes("-topmost", True)
 
@@ -386,14 +404,20 @@ class LauncherApp(ctk.CTk):
                     True,
                 )
 
-                if self.state() != "iconic":
+                if (
+                    not self._suspend_keep_above
+                    and self.state() != "iconic"
+                ):
                     self.lift()
 
                 # Keep modal/tool child windows above the launcher too.
                 for child in self.winfo_children():
-                    if isinstance(
-                        child,
-                        tk.Toplevel,
+                    if (
+                        not self._suspend_keep_above
+                        and isinstance(
+                            child,
+                            tk.Toplevel,
+                        )
                     ):
                         try:
                             if child.winfo_viewable():
@@ -509,10 +533,11 @@ class LauncherApp(ctk.CTk):
         self.source_status.grid(row=0, column=3, padx=(4, 8), pady=7)
 
     def _build_create_bar(self):
-        card = CompactCard(self, height=48)
+        card = CompactCard(self, height=86)
         card.grid(row=2, column=0, sticky="ew", padx=8, pady=3)
         card.grid_propagate(False)
         card.grid_columnconfigure(1, weight=1)
+        card.grid_columnconfigure(2, weight=1)
 
         ctk.CTkLabel(
             card,
@@ -521,49 +546,129 @@ class LauncherApp(ctk.CTk):
             font=ctk.CTkFont(size=10, weight="bold"),
             width=64,
             anchor="w",
-        ).grid(row=0, column=0, padx=(10, 4), pady=7)
+        ).grid(row=0, column=0, padx=(10, 4), pady=(7, 3))
 
         self.profile_entry = ctk.CTkEntry(
             card,
             textvariable=self.profile_name,
-            height=28,
+            height=27,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             placeholder_text="Tên profile...",
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=9),
         )
-        self.profile_entry.grid(row=0, column=1, sticky="ew", padx=3, pady=6)
+        self.profile_entry.grid(
+            row=0,
+            column=1,
+            columnspan=2,
+            sticky="ew",
+            padx=3,
+            pady=(6, 2),
+        )
 
         ctk.CTkButton(
             card,
             text="+",
             width=32,
-            height=28,
+            height=27,
             fg_color=COLORS["blue"],
             hover_color=COLORS["blue_hover"],
             command=self._create,
-        ).grid(row=0, column=2, padx=4)
+        ).grid(row=0, column=3, padx=3, pady=(6, 2))
 
         ctk.CTkButton(
             card,
-            text="Mở",
-            width=40,
-            height=28,
+            text="Mở tay",
+            width=54,
+            height=27,
             fg_color=COLORS["purple"],
             hover_color=COLORS["purple_hover"],
             command=self._continue_login,
-        ).grid(row=0, column=3, padx=4)
+        ).grid(row=0, column=4, padx=(3, 8), pady=(6, 2))
+
+        ctk.CTkLabel(
+            card,
+            text="🔐",
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(size=10),
+            width=28,
+        ).grid(row=1, column=0, padx=(8, 1), pady=(2, 7))
+
+        self.login_username_entry = ctk.CTkEntry(
+            card,
+            textvariable=self.login_username,
+            height=27,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            placeholder_text="Tài khoản",
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=8),
+        )
+        self.login_username_entry.grid(
+            row=1,
+            column=1,
+            sticky="ew",
+            padx=3,
+            pady=(2, 7),
+        )
+
+        self.login_password_entry = ctk.CTkEntry(
+            card,
+            textvariable=self.login_password,
+            height=27,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            placeholder_text="Mật khẩu",
+            show="•",
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=8),
+        )
+        self.login_password_entry.grid(
+            row=1,
+            column=2,
+            sticky="ew",
+            padx=3,
+            pady=(2, 7),
+        )
+
+        self.login_server_combo = ctk.CTkComboBox(
+            card,
+            variable=self.login_server,
+            values=tuple(
+                SERVER_LABELS.values()
+            ),
+            width=86,
+            height=27,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            dropdown_fg_color=COLORS["surface_alt"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=8),
+            dropdown_font=ctk.CTkFont(size=8),
+        )
+        self.login_server_combo.grid(
+            row=1,
+            column=3,
+            padx=3,
+            pady=(2, 7),
+        )
 
         ctk.CTkButton(
             card,
             text="Login",
-            width=48,
-            height=28,
-            fg_color=COLORS["surface_soft"],
-            hover_color=COLORS["border_bright"],
-            command=self._confirm_login,
-        ).grid(row=0, column=4, padx=(3, 8))
+            width=54,
+            height=27,
+            fg_color=COLORS["green"],
+            hover_color=COLORS["green_hover"],
+            text_color=COLORS["black"],
+            command=self._auto_login_selected,
+        ).grid(
+            row=1,
+            column=4,
+            padx=(3, 8),
+            pady=(2, 7),
+        )
 
     def _build_profile_panel(self):
         panel = CompactCard(self)
@@ -1137,12 +1242,18 @@ class LauncherApp(ctk.CTk):
 
     def _focus_profile(self, profile_id):
         self.selected_profile_id = profile_id
+        self._load_login_fields(
+            profile_id
+        )
         self._refresh()
 
     def _toggle_profile(self, profile_id, enabled):
         if enabled:
             self.checked.add(profile_id)
             self.selected_profile_id = profile_id
+            self._load_login_fields(
+                profile_id
+            )
         else:
             self.checked.discard(profile_id)
         self._refresh()
@@ -1349,6 +1460,11 @@ class LauncherApp(ctk.CTk):
             self.profile_name.set("")
             self.statuses[profile.profile_id] = "Creating"
             self.selected_profile_id = profile.profile_id
+            self.login_username.set("")
+            self.login_password.set("")
+            self.login_server.set(
+                SERVER_LABELS["van_lang"]
+            )
             self._refresh()
             self._run_creation(profile, source, repair=False)
 
