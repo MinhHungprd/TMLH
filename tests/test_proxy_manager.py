@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import proxy_manager as proxy_module
+
 from proxy_manager import (
     Socks5Proxy,
     assign_profile_proxies,
@@ -211,3 +213,140 @@ def test_two_profiles_stay_direct_in_normal_mode():
     assert config[
         "proxies"
     ] == []
+
+
+
+def test_socks5_connectivity_check_accepts_valid_auth_and_connect(
+    monkeypatch,
+):
+    class FakeSocket:
+        def __init__(self):
+            self.responses = bytearray(
+                b"\x05\x02"
+                b"\x01\x00"
+                b"\x05\x00\x00\x01"
+                b"\x00\x00\x00\x00"
+                b"\x00\x00"
+            )
+            self.sent = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(
+            self,
+            exc_type,
+            exc,
+            tb,
+        ):
+            return False
+
+        def settimeout(
+            self,
+            timeout,
+        ):
+            pass
+
+        def sendall(
+            self,
+            data,
+        ):
+            self.sent.append(
+                data
+            )
+
+        def recv(
+            self,
+            size,
+        ):
+            data = bytes(
+                self.responses[:size]
+            )
+            del self.responses[:size]
+            return data
+
+    fake = FakeSocket()
+
+    monkeypatch.setattr(
+        proxy_module.socket,
+        "create_connection",
+        lambda *args, **kwargs: fake,
+    )
+
+    result = (
+        proxy_module
+        .test_socks5_proxy(
+            proxy("10.0.0.1"),
+        )
+    )
+
+    assert result.ok is True
+    assert (
+        "CONNECT OK"
+        in result.detail
+    )
+    assert len(fake.sent) == 3
+
+
+def test_socks5_connectivity_check_reports_bad_credentials(
+    monkeypatch,
+):
+    class FakeSocket:
+        def __init__(self):
+            self.responses = bytearray(
+                b"\x05\x02"
+                b"\x01\x01"
+            )
+
+        def __enter__(self):
+            return self
+
+        def __exit__(
+            self,
+            exc_type,
+            exc,
+            tb,
+        ):
+            return False
+
+        def settimeout(
+            self,
+            timeout,
+        ):
+            pass
+
+        def sendall(
+            self,
+            data,
+        ):
+            pass
+
+        def recv(
+            self,
+            size,
+        ):
+            data = bytes(
+                self.responses[:size]
+            )
+            del self.responses[:size]
+            return data
+
+    monkeypatch.setattr(
+        proxy_module.socket,
+        "create_connection",
+        lambda *args, **kwargs:
+        FakeSocket(),
+    )
+
+    result = (
+        proxy_module
+        .test_socks5_proxy(
+            proxy("10.0.0.1"),
+        )
+    )
+
+    assert result.ok is False
+    assert (
+        "username/password"
+        in result.detail
+    )
