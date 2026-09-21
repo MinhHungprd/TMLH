@@ -1,6 +1,7 @@
 # Generated game profile clones
 Game/profiles/
 **/.tmlh_profile_auth.bin
+**/.tmlh_login_credentials.bin
 
 # Local data
 profiles.json
