@@ -1812,6 +1812,13 @@ class LauncherApp(ctk.CTk):
             )
         )
 
+        # Read Tk variables before starting the worker thread.
+        import_size = self.batch_size.get()
+        import_boss = BOSS_KEYS.get(
+            self.batch_boss.get(),
+            self.batch_boss.get(),
+        )
+
         self._notify(
             (
                 f"Đang tạo {len(entries)} "
@@ -1835,17 +1842,12 @@ class LauncherApp(ctk.CTk):
                         )
                     )
 
-                    size = self.batch_size.get()
-                    boss = BOSS_KEYS.get(
-                        self.batch_boss.get(),
-                        self.batch_boss.get(),
-                    )
                     profile = (
                         self.controller
                         .set_options(
                             profile.profile_id,
-                            boss,
-                            size,
+                            import_boss,
+                            import_size,
                         )
                     )
 
