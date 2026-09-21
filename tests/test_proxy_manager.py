@@ -8,6 +8,7 @@ from proxy_manager import (
     build_proxifyre_config,
     parse_proxy_line,
     proxy_for_profile_index,
+    proxy_for_test_profile_index,
 )
 
 
@@ -139,3 +140,74 @@ def test_invalid_proxy_format_is_rejected():
         parse_proxy_line(
             "1.2.3.4:1080"
         )
+
+
+
+def test_small_batch_test_mode_routes_second_profile_through_first_proxy():
+    assert proxy_for_test_profile_index(
+        0,
+        2,
+    ) is None
+    assert proxy_for_test_profile_index(
+        1,
+        2,
+    ) == 0
+    assert proxy_for_test_profile_index(
+        2,
+        2,
+    ) == 1
+    assert proxy_for_test_profile_index(
+        3,
+        2,
+    ) == 1
+
+
+def test_two_profiles_can_build_real_proxy_route_in_test_mode():
+    profiles = [
+        profile(0),
+        profile(1),
+    ]
+
+    config = build_proxifyre_config(
+        profiles,
+        [proxy("10.0.0.1")],
+        test_mode=True,
+    )
+
+    assert len(
+        config["proxies"]
+    ) == 1
+
+    rule = config["proxies"][0]
+
+    assert rule[
+        "socks5ProxyEndpoint"
+    ] == "10.0.0.1:1080"
+
+    assert len(
+        rule["appNames"]
+    ) == 1
+
+    assert "P2" in rule[
+        "appNames"
+    ][0]
+
+    assert "P1" not in rule[
+        "appNames"
+    ][0]
+
+
+def test_two_profiles_stay_direct_in_normal_mode():
+    profiles = [
+        profile(0),
+        profile(1),
+    ]
+
+    config = build_proxifyre_config(
+        profiles,
+        [proxy("10.0.0.1")],
+    )
+
+    assert config[
+        "proxies"
+    ] == []
