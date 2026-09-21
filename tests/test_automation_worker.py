@@ -146,3 +146,60 @@ def test_input_manager_skips_click_after_stop():
     manager = InputManager(lambda *args: calls.append(args))
     assert manager.click_center(7, (2, 3), stopped) is False
     assert calls == []
+
+
+
+def test_game_lifecycle_rebinds_zero_size_unity_window():
+    from unittest.mock import patch
+    from game_automation import GameLifecycle
+
+    ctx = context()
+    ctx.process_id = 42
+    ctx.window_handle = 100
+
+    with patch(
+        "game_automation.get_client_size",
+        side_effect=[
+            (0, 0),
+            (480, 270),
+        ],
+    ), patch(
+        "game_automation.find_window_for_pid",
+        return_value=200,
+    ), patch(
+        "game_automation.set_profile_window_title",
+    ) as set_title, patch(
+        "game_automation.ensure_client_size",
+        return_value=False,
+    ):
+        resized = GameLifecycle().ensure_size(
+            ctx
+        )
+
+    assert resized is False
+    assert ctx.window_handle == 200
+    set_title.assert_called_once_with(
+        200,
+        "P",
+    )
+
+
+def test_game_lifecycle_treats_zero_size_without_replacement_as_transient():
+    from unittest.mock import patch
+    from game_automation import GameLifecycle
+
+    ctx = context()
+    ctx.process_id = 42
+    ctx.window_handle = 100
+
+    with patch(
+        "game_automation.get_client_size",
+        return_value=(0, 0),
+    ), patch(
+        "game_automation.find_window_for_pid",
+        return_value=None,
+    ):
+        assert (
+            GameLifecycle().ensure_size(ctx)
+            is None
+        )
