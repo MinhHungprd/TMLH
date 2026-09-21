@@ -126,12 +126,13 @@ def format_perf_report(
 
     preferred = (
         "capture_ms",
-        "boss_batch_ms",
-        "boss_batch_size",
+        "capture_batch_ms",
+        "capture_batch_size",
         "asset_scan_ms",
         "vision_ms",
         "wait_ocr_ms",
         "ocr_ms",
+        "wait_frida_ms",
         "frida_ms",
         "debug_io_ms",
     )
