@@ -131,7 +131,7 @@ def test_has_gameplay_socket_accepts_dynamic_non_login_port():
         ) is True
 
 
-def test_has_gameplay_socket_rejects_login_only_connection():
+def test_has_gameplay_socket_accepts_established_same_port_fallback():
     process = FakeProcess(
         42,
         [
@@ -148,4 +148,26 @@ def test_has_gameplay_socket_rejects_login_only_connection():
     ):
         assert has_gameplay_socket(
             42
-        ) is False
+        ) is True
+
+
+
+def test_discovery_falls_back_to_8001_when_it_is_the_only_connection():
+    process = FakeProcess(
+        42,
+        [
+            _conn(
+                "10.0.0.8",
+                8001,
+            ),
+        ],
+    )
+
+    assert discover_game_remotes(
+        process
+    ) == [
+        {
+            "ip": "10.0.0.8",
+            "port": 8001,
+        }
+    ]
