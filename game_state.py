@@ -160,6 +160,152 @@ class GameStateDetector:
             search_roi,
         )
 
+    def check_signal(
+        self,
+        context,
+        signal_name: str,
+    ) -> SignalCheck:
+        """
+        Check exactly one startup/login signal using canonical coordinates.
+
+        This is used by automatic login so it does not waste work matching
+        all startup assets on every polling iteration.
+        """
+        signal = next(
+            (
+                item
+                for item in self.SIGNALS
+                if item[0] == signal_name
+            ),
+            None,
+        )
+
+        if signal is None:
+            raise ValueError(
+                f"Unknown signal: {signal_name}"
+            )
+
+        name, asset, roi = signal
+
+        if self.matcher is not None:
+            detected = bool(
+                self.matcher(
+                    name,
+                    roi,
+                )
+            )
+
+            if not detected:
+                return SignalCheck(
+                    False,
+                    None,
+                )
+
+            client_width = (
+                context.window_width
+            )
+            client_height = (
+                context.window_height
+            )
+
+            if name == "s1":
+                return SignalCheck(
+                    True,
+                    None,
+                )
+
+            return SignalCheck(
+                True,
+                CLICK_CENTER,
+                base_point_to_client(
+                    roi_center(roi),
+                    client_width,
+                    client_height,
+                ),
+            )
+
+        raw = self.capture(
+            context.window_handle
+        )
+        actual_height, actual_width = (
+            raw.shape[:2]
+        )
+
+        search_roi = expand_roi(
+            roi,
+            padding=6,
+            image_width=BASE_WIDTH,
+            image_height=BASE_HEIGHT,
+        )
+
+        x, y, w, h = scale_roi(
+            search_roi,
+            actual_width,
+            actual_height,
+        )
+
+        x = max(
+            0,
+            min(
+                x,
+                actual_width - 1,
+            ),
+        )
+        y = max(
+            0,
+            min(
+                y,
+                actual_height - 1,
+            ),
+        )
+        w = max(
+            1,
+            min(
+                w,
+                actual_width - x,
+            ),
+        )
+        h = max(
+            1,
+            min(
+                h,
+                actual_height - y,
+            ),
+        )
+
+        region = raw[
+            y:y + h,
+            x:x + w,
+        ]
+
+        detected = self._match_region(
+            region,
+            asset,
+            search_roi,
+        )
+
+        if not detected:
+            return SignalCheck(
+                False,
+                None,
+            )
+
+        if name == "s1":
+            return SignalCheck(
+                True,
+                None,
+            )
+
+        return SignalCheck(
+            True,
+            CLICK_CENTER,
+            base_point_to_client(
+                roi_center(roi),
+                actual_width,
+                actual_height,
+            ),
+        )
+
     def check_signals(self, context):
         with perf_timer(
             "asset_scan_ms"
