@@ -519,14 +519,14 @@ class LauncherApp(ctk.CTk):
             title,
             text=APP_VERSION,
             text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=8),
+            font=ctk.CTkFont(size=11),
         ).pack(side="left", padx=(6, 0), pady=(4, 0))
 
         self.header_status = ctk.CTkLabel(
             header,
             text="●  Sẵn sàng",
             text_color=COLORS["green"],
-            font=ctk.CTkFont(size=9, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
         )
         self.header_status.grid(row=0, column=2, padx=8, sticky="e")
 
@@ -540,7 +540,7 @@ class LauncherApp(ctk.CTk):
             card,
             text="🎮 Game",
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=9, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
             width=64,
             anchor="w",
         ).grid(row=0, column=0, padx=(10, 4), pady=7)
@@ -552,7 +552,7 @@ class LauncherApp(ctk.CTk):
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=9),
+            font=ctk.CTkFont(size=12),
         )
         self.source_entry.grid(row=0, column=1, sticky="ew", padx=3, pady=6)
         self.source_entry.bind("<FocusOut>", lambda _event: self._update_source_status())
@@ -1294,7 +1294,7 @@ class LauncherApp(ctk.CTk):
 
     def _build_log_panel(self):
         panel = CompactCard(self, height=96)
-        panel.grid(row=5, column=0, sticky="ew", padx=8, pady=3)
+        panel.grid(row=6, column=0, sticky="ew", padx=8, pady=3)
         panel.grid_propagate(False)
         panel.grid_columnconfigure(0, weight=1)
 
@@ -1327,7 +1327,7 @@ class LauncherApp(ctk.CTk):
             border_color=COLORS["border"],
             corner_radius=8,
             text_color=COLORS["muted"],
-            font=("Consolas", 8),
+            font=("Consolas", 11),
             wrap="word",
         )
         self.log.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
@@ -1348,7 +1348,7 @@ class LauncherApp(ctk.CTk):
             corner_radius=0,
             fg_color=COLORS["sidebar"],
         )
-        footer.grid(row=6, column=0, sticky="ew", pady=(3, 0))
+        footer.grid(row=7, column=0, sticky="ew", pady=(3, 0))
         footer.grid_propagate(False)
         footer.grid_columnconfigure(1, weight=1)
 
@@ -1363,14 +1363,14 @@ class LauncherApp(ctk.CTk):
             footer,
             text="Smart play",
             text_color=COLORS["muted_dark"],
-            font=ctk.CTkFont(size=8),
+            font=ctk.CTkFont(size=11),
         ).grid(row=0, column=1)
 
         ctk.CTkLabel(
             footer,
             text="TMLH",
             text_color=COLORS["muted_dark"],
-            font=ctk.CTkFont(size=8),
+            font=ctk.CTkFont(size=11),
         ).grid(row=0, column=2, padx=12)
 
     # ------------------------------------------------------------------
