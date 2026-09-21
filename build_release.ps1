@@ -70,6 +70,7 @@ $RequiredFiles = @(
     "launcher_gui.py",
     "game_automation.py",
     "boss_detector.py",
+    "capture_broker.py",
     "ocr_service.py",
     "requirements.txt",
     "boss\enter_boss.py",
@@ -232,6 +233,7 @@ from PyInstaller.utils.hooks import collect_all
 root = Path(SPECPATH)
 frida_datas, frida_binaries, frida_hiddenimports = collect_all("frida")
 ctk_datas, ctk_binaries, ctk_hiddenimports = collect_all("customtkinter")
+mss_datas, mss_binaries, mss_hiddenimports = collect_all("mss")
 
 datas = [
     (str(root / "assets"), "assets"),
@@ -240,13 +242,14 @@ datas = [
 ]
 datas += frida_datas
 datas += ctk_datas
+datas += mss_datas
 
 a = Analysis(
     [str(root / "build_entry.py")],
     pathex=[str(root)],
-    binaries=frida_binaries + ctk_binaries,
+    binaries=frida_binaries + ctk_binaries + mss_binaries,
     datas=datas,
-    hiddenimports=frida_hiddenimports + ctk_hiddenimports + [
+    hiddenimports=frida_hiddenimports + ctk_hiddenimports + mss_hiddenimports + [
         "win32api",
         "win32con",
         "win32gui",
