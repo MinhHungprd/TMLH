@@ -49,7 +49,15 @@ class ProfileManager:
             raise ValueError("Profile game path is outside its assigned clone directory")
         return destination
 
-    def prepare_profile(self, name: str, source_path: Path, existing: list[Profile]) -> Profile:
+    def prepare_profile(
+        self,
+        name: str,
+        source_path: Path,
+        existing: list[Profile],
+        *,
+        account_username: str = "",
+        server: str = "van_lang",
+    ) -> Profile:
         source = validate_source_path(source_path)
         safe_name = validate_profile_name(name, existing)
         destination = profile_clone_path(self.bot_root, safe_name)
@@ -64,6 +72,8 @@ class ProfileManager:
             window_width=320,
             window_height=180,
             created_at=datetime.now(timezone.utc).isoformat(),
+            account_username=account_username.strip(),
+            server=server,
         )
 
     def clone_profile(self, profile: Profile, source_path: Path) -> None:
