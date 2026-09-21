@@ -173,6 +173,120 @@ class AutoLoginRunner:
                 "Đã dừng auto login"
             )
 
+    def _scan_login_cycle(
+        self,
+        context,
+        signal_name,
+    ):
+        """
+        Scan one login loop from a single screenshot.
+
+        S2 (asset__x742_y437_w45_h24.png) is an exceptional intro/skip
+        overlay and is checked on EVERY login polling cycle. If it appears,
+        click its scaled center first and do not act on any other signal from
+        the same stale frame.
+        """
+        signal_index = {
+            "s1": 0,
+            "s2": 1,
+            "s3": 2,
+        }
+
+        if signal_name not in signal_index:
+            raise ValueError(
+                f"Unknown login signal: {signal_name}"
+            )
+
+        if hasattr(
+            self.detector,
+            "check_signals",
+        ):
+            checks = (
+                self.detector
+                .check_signals(
+                    context
+                )
+            )
+
+            skip = checks[1]
+
+            if skip.detected:
+                if skip.coordinates is None:
+                    raise RuntimeError(
+                        "Tín hiệu skip giới thiệu không có tọa độ click"
+                    )
+
+                if not self.input.click_center(
+                    context.window_handle,
+                    skip.coordinates,
+                    context.stop_event,
+                    context.process_id,
+                ):
+                    raise InterruptedError(
+                        "Đã dừng auto login"
+                    )
+
+                self.on_log(
+                    "Auto login: phát hiện giới thiệu → Skip"
+                )
+
+                return (
+                    None,
+                    True,
+                )
+
+            return (
+                checks[
+                    signal_index[
+                        signal_name
+                    ]
+                ],
+                False,
+            )
+
+        # Compatibility path for injected/custom detectors.
+        skip = (
+            self.detector
+            .check_signal(
+                context,
+                "s2",
+            )
+        )
+
+        if skip.detected:
+            if skip.coordinates is None:
+                raise RuntimeError(
+                    "Tín hiệu skip giới thiệu không có tọa độ click"
+                )
+
+            if not self.input.click_center(
+                context.window_handle,
+                skip.coordinates,
+                context.stop_event,
+                context.process_id,
+            ):
+                raise InterruptedError(
+                    "Đã dừng auto login"
+                )
+
+            self.on_log(
+                "Auto login: phát hiện giới thiệu → Skip"
+            )
+
+            return (
+                None,
+                True,
+            )
+
+        return (
+            self.detector
+            .check_signal(
+                context,
+                signal_name,
+            ),
+            False,
+        )
+
     def _wait_for_signal(
         self,
         context,
@@ -194,15 +308,26 @@ class AutoLoginRunner:
                 context
             )
 
-            check = (
-                self.detector
-                .check_signal(
+            check, skipped_intro = (
+                self._scan_login_cycle(
                     context,
                     signal_name,
                 )
             )
 
-            if check.detected:
+            if skipped_intro:
+                # Give the intro overlay a moment to disappear before the
+                # next one-capture login scan.
+                self._wait_short(
+                    context,
+                    0.35,
+                )
+                continue
+
+            if (
+                check is not None
+                and check.detected
+            ):
                 return check
 
             self._wait_short(
