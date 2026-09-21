@@ -22,6 +22,11 @@ BOSS_ALIVE_MATCH_PADDING = 4
 BOSS_ALIVE_MATCH_THRESHOLD = 0.82
 BOSS_ALIVE_FALLBACK_MISSES = 3
 
+# TEST MODE: temporarily disable OCR fallback so boss-alive behavior can be
+# evaluated from the new marker/visual path without Tesseract masking misses.
+# OCR implementation remains intact and can be re-enabled by setting True.
+BOSS_OCR_FALLBACK_ENABLED = False
+
 # One ROI covers both the existing HP digits and the padded alive marker.
 # This keeps boss detection at one screen capture per scan.
 BOSS_SCAN_ROI = (375, 8, 84, 41)
