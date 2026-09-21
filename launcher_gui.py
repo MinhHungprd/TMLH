@@ -367,8 +367,8 @@ class LauncherApp(ctk.CTk):
         self._log_flush_after_id = None
 
         self.title(f"{APP_NAME} - Profile Bot")
-        self.geometry("620x720")
-        self.minsize(580, 650)
+        self.geometry("480x700")
+        self.minsize(460, 640)
         self.configure(fg_color=COLORS["bg"])
         self.attributes("-topmost", True)
 
@@ -398,43 +398,34 @@ class LauncherApp(ctk.CTk):
 
     def _keep_tool_above_games(self):
         """
-        Game windows are intentionally TOPMOST. Re-raise the tool without
-        stealing focus so the dashboard and its child dialogs stay visible.
+        Keep real dialogs above TOPMOST game windows, but never periodically
+        lift the launcher itself. Re-lifting the launcher can cover
+        CustomTkinter combobox dropdowns while they are open.
         """
         try:
-            if self.winfo_exists():
-                self.attributes(
-                    "-topmost",
-                    True,
-                )
+            if not self.winfo_exists():
+                return
 
-                if (
-                    not self._suspend_keep_above
-                    and self.state() != "iconic"
-                ):
-                    self.lift()
-
-                # Keep modal/tool child windows above the launcher too.
+            if not self._suspend_keep_above:
                 for child in self.winfo_children():
-                    if (
-                        not self._suspend_keep_above
-                        and isinstance(
-                            child,
-                            tk.Toplevel,
-                        )
+                    if not isinstance(
+                        child,
+                        tk.Toplevel,
                     ):
-                        try:
-                            if child.winfo_viewable():
-                                keep_above_game(
-                                    child
-                                )
-                        except tk.TclError:
-                            pass
+                        continue
 
-                self.after(
-                    750,
-                    self._keep_tool_above_games,
-                )
+                    try:
+                        if child.winfo_viewable():
+                            keep_above_game(
+                                child
+                            )
+                    except tk.TclError:
+                        pass
+
+            self.after(
+                750,
+                self._keep_tool_above_games,
+            )
         except tk.TclError:
             pass
 
@@ -539,7 +530,7 @@ class LauncherApp(ctk.CTk):
     def _build_create_bar(self):
         card = CompactCard(
             self,
-            height=154,
+            height=132,
         )
         card.grid(
             row=2,
@@ -549,81 +540,90 @@ class LauncherApp(ctk.CTk):
             pady=3,
         )
         card.grid_propagate(False)
-
-        for column in range(6):
-            card.grid_columnconfigure(
-                column,
-                weight=1 if column in (1, 2, 3) else 0,
-            )
+        card.grid_columnconfigure(
+            0,
+            minsize=76,
+            weight=0,
+        )
+        card.grid_columnconfigure(
+            1,
+            weight=1,
+        )
+        card.grid_columnconfigure(
+            2,
+            weight=1,
+        )
+        card.grid_columnconfigure(
+            3,
+            minsize=142,
+            weight=0,
+        )
 
         ctk.CTkLabel(
             card,
-            text="1. Tạo profile",
+            text="1. Tạo",
             text_color=COLORS["cyan"],
             font=ctk.CTkFont(
-                size=10,
+                size=9,
                 weight="bold",
             ),
-            width=92,
             anchor="w",
         ).grid(
             row=0,
             column=0,
-            padx=(10, 5),
-            pady=(8, 3),
+            padx=(10, 4),
+            pady=(7, 3),
             sticky="w",
         )
 
         self.profile_entry = ctk.CTkEntry(
             card,
             textvariable=self.profile_name,
-            height=28,
+            height=27,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             placeholder_text="Tên profile mới...",
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=9),
+            font=ctk.CTkFont(size=8),
         )
         self.profile_entry.grid(
             row=0,
             column=1,
-            columnspan=3,
+            columnspan=2,
             sticky="ew",
             padx=3,
-            pady=(7, 3),
+            pady=(6, 3),
         )
 
         ctk.CTkButton(
             card,
             text="Tạo profile",
-            width=90,
-            height=28,
+            width=86,
+            height=27,
             fg_color=COLORS["blue"],
             hover_color=COLORS["blue_hover"],
             command=self._create,
         ).grid(
             row=0,
-            column=4,
-            columnspan=2,
-            padx=(5, 10),
-            pady=(7, 3),
-            sticky="e",
+            column=3,
+            sticky="ew",
+            padx=(4, 10),
+            pady=(6, 3),
         )
 
         ctk.CTkLabel(
             card,
-            text="2. Đăng nhập",
+            text="2. Login",
             text_color=COLORS["green"],
             font=ctk.CTkFont(
-                size=10,
+                size=9,
                 weight="bold",
             ),
-            width=92,
             anchor="w",
         ).grid(
             row=1,
             column=0,
-            padx=(10, 5),
+            padx=(10, 4),
             pady=3,
             sticky="w",
         )
@@ -632,11 +632,13 @@ class LauncherApp(ctk.CTk):
             card,
             variable=self.login_profile,
             values=(),
-            width=130,
-            height=28,
+            height=27,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
+            button_color=COLORS["surface_soft"],
+            button_hover_color=COLORS["blue_hover"],
             dropdown_fg_color=COLORS["surface_alt"],
+            dropdown_hover_color=COLORS["surface_soft"],
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=8),
             dropdown_font=ctk.CTkFont(size=8),
@@ -645,7 +647,6 @@ class LauncherApp(ctk.CTk):
         self.login_profile_combo.grid(
             row=1,
             column=1,
-            columnspan=2,
             sticky="ew",
             padx=3,
             pady=3,
@@ -657,18 +658,20 @@ class LauncherApp(ctk.CTk):
             values=tuple(
                 SERVER_LABELS.values()
             ),
-            width=100,
-            height=28,
+            height=27,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
+            button_color=COLORS["surface_soft"],
+            button_hover_color=COLORS["blue_hover"],
             dropdown_fg_color=COLORS["surface_alt"],
+            dropdown_hover_color=COLORS["surface_soft"],
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=8),
             dropdown_font=ctk.CTkFont(size=8),
         )
         self.login_server_combo.grid(
             row=1,
-            column=3,
+            column=2,
             sticky="ew",
             padx=3,
             pady=3,
@@ -676,23 +679,39 @@ class LauncherApp(ctk.CTk):
 
         ctk.CTkLabel(
             card,
-            text="Chọn profile + server trước",
+            text="Chọn profile + server",
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=8),
             anchor="w",
         ).grid(
             row=1,
-            column=4,
-            columnspan=2,
+            column=3,
             sticky="w",
             padx=(6, 10),
             pady=3,
         )
 
+        ctk.CTkLabel(
+            card,
+            text="TK / MK",
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(
+                size=8,
+                weight="bold",
+            ),
+            anchor="w",
+        ).grid(
+            row=2,
+            column=0,
+            padx=(10, 4),
+            pady=3,
+            sticky="w",
+        )
+
         self.login_username_entry = ctk.CTkEntry(
             card,
             textvariable=self.login_username,
-            height=28,
+            height=27,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             placeholder_text="Tài khoản",
@@ -710,7 +729,7 @@ class LauncherApp(ctk.CTk):
         self.login_password_entry = ctk.CTkEntry(
             card,
             textvariable=self.login_password,
-            height=28,
+            height=27,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             placeholder_text="Mật khẩu",
@@ -721,7 +740,6 @@ class LauncherApp(ctk.CTk):
         self.login_password_entry.grid(
             row=2,
             column=2,
-            columnspan=2,
             sticky="ew",
             padx=3,
             pady=3,
@@ -729,41 +747,53 @@ class LauncherApp(ctk.CTk):
 
         ctk.CTkButton(
             card,
-            text="▶ Tự đăng nhập + tự lưu",
-            height=28,
+            text="▶ Tự đăng nhập + lưu",
+            height=27,
             fg_color=COLORS["green"],
             hover_color=COLORS["green_hover"],
             text_color=COLORS["black"],
             font=ctk.CTkFont(
-                size=9,
+                size=8,
                 weight="bold",
             ),
             command=self._auto_login_selected,
         ).grid(
             row=2,
-            column=4,
-            columnspan=2,
+            column=3,
             sticky="ew",
-            padx=(5, 10),
+            padx=(4, 10),
             pady=3,
         )
 
         ctk.CTkLabel(
             card,
-            text=(
-                "Tự động: mở game → chọn server → nhập TK/MK → đăng nhập "
-                "→ bấm Bắt đầu → tự lưu auth. Không cần xác nhận thêm."
-            ),
+            text="Thủ công",
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=8),
             anchor="w",
         ).grid(
             row=3,
             column=0,
-            columnspan=4,
+            padx=(10, 4),
+            pady=(2, 7),
             sticky="w",
-            padx=(10, 5),
-            pady=(3, 8),
+        )
+
+        ctk.CTkLabel(
+            card,
+            text=(
+                "Tự động đã bao gồm xác nhận auth."
+            ),
+            text_color=COLORS["muted_dark"],
+            font=ctk.CTkFont(size=7),
+            anchor="w",
+        ).grid(
+            row=3,
+            column=1,
+            columnspan=2,
+            sticky="w",
+            padx=3,
+            pady=(2, 7),
         )
 
         manual = ctk.CTkFrame(
@@ -772,31 +802,30 @@ class LauncherApp(ctk.CTk):
         )
         manual.grid(
             row=3,
-            column=4,
-            columnspan=2,
+            column=3,
             sticky="e",
-            padx=(5, 10),
-            pady=(3, 7),
+            padx=(4, 10),
+            pady=(2, 7),
         )
 
         ctk.CTkButton(
             manual,
-            text="Mở thủ công",
-            width=84,
-            height=24,
+            text="Mở tay",
+            width=58,
+            height=23,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
             command=self._continue_login,
         ).pack(
             side="left",
-            padx=(0, 4),
+            padx=(0, 3),
         )
 
         ctk.CTkButton(
             manual,
-            text="Xác nhận đã đăng nhập",
-            width=116,
-            height=24,
+            text="Xác nhận",
+            width=66,
+            height=23,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
             command=self._confirm_login,
@@ -850,7 +879,7 @@ class LauncherApp(ctk.CTk):
             corner_radius=8,
             height=34,
         )
-        header.grid(row=1, column=0, sticky="w", padx=(8, 20), pady=(0, 4))
+        header.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 4))
         header.grid_propagate(False)
 
         columns = (
@@ -861,7 +890,11 @@ class LauncherApp(ctk.CTk):
             ("Ctrl", PROFILE_COLUMN_WIDTHS[4]),
         )
         for index, (label, width) in enumerate(columns):
-            header.grid_columnconfigure(index, minsize=width, weight=0)
+            header.grid_columnconfigure(
+                index,
+                minsize=width,
+                weight=1 if index == 1 else 0,
+            )
             ctk.CTkLabel(
                 header,
                 text=label,
