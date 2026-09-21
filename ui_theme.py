@@ -47,6 +47,7 @@ STATUS_COLORS = {
     "waiting respawn": (COLORS["amber"], "#412B0A"),
     "boss dead confirming": (COLORS["amber"], "#412B0A"),
     "boss dead": (COLORS["amber"], "#412B0A"),
+    "boss signal error": (COLORS["red"], "#42141D"),
     "stopping": (COLORS["amber"], "#412B0A"),
     "stopped": (COLORS["muted"], "#142235"),
     "error": (COLORS["red"], "#42141D"),
