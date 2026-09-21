@@ -36,8 +36,11 @@ from window_manager import (
     PROFILE_LAUNCH_LOCK,
     acquire_profile_window,
     ensure_client_size,
+    find_window_for_pid,
+    get_client_size,
     non_boss_window_visible,
     resize_client,
+    set_profile_window_title,
 )
 
 
@@ -97,33 +100,84 @@ class GameLifecycle:
             context.window_height,
         )
 
-    def valid(self, context):
-        if (
-            context.process_id is None
-            or context.window_handle is None
-        ):
-            return False
+    def _rebind_window(self, context):
+        if context.process_id is None:
+            return None
 
-        if not win32gui.IsWindow(
-            context.window_handle
-        ):
-            return False
-
-        owner_pid = (
-            win32process
-            .GetWindowThreadProcessId(
-                context.window_handle
-            )[1]
+        hwnd = find_window_for_pid(
+            context.process_id
         )
 
+        if hwnd is None:
+            return None
+
+        context.window_handle = hwnd
+
+        if context.profile_name:
+            set_profile_window_title(
+                hwnd,
+                context.profile_name,
+            )
+
+        return hwnd
+
+    def valid(self, context):
+        if context.process_id is None:
+            return False
+
+        hwnd = context.window_handle
+
+        if (
+            hwnd is not None
+            and win32gui.IsWindow(hwnd)
+        ):
+            owner_pid = (
+                win32process
+                .GetWindowThreadProcessId(
+                    hwnd
+                )[1]
+            )
+
+            if owner_pid == context.process_id:
+                return True
+
         return (
-            owner_pid
-            == context.process_id
+            self._rebind_window(
+                context
+            )
+            is not None
         )
 
     def ensure_size(self, context):
+        hwnd = context.window_handle
+
+        try:
+            width, height = get_client_size(
+                hwnd
+            )
+        except Exception:
+            width = height = 0
+
+        if width <= 0 or height <= 0:
+            hwnd = self._rebind_window(
+                context
+            )
+
+            if hwnd is None:
+                # Unity can briefly expose only a 0x0 helper window while
+                # creating/recreating the real render window. This is a
+                # transient "not ready", not a fatal automation error.
+                return None
+
+            width, height = get_client_size(
+                hwnd
+            )
+
+            if width <= 0 or height <= 0:
+                return None
+
         return ensure_client_size(
-            context.window_handle,
+            hwnd,
             context.window_width,
             context.window_height,
         )
@@ -371,6 +425,17 @@ class AutomationWorker:
                     self.context
                 )
             )
+
+            if resized is None:
+                # Window exists but Unity render client is still transient
+                # (for example 0x0 while recreating). Wait and retry instead
+                # of treating this as a profile failure.
+                if self.wait(
+                    GAME_STATE_POLL_INTERVAL,
+                    self.context.stop_event,
+                ):
+                    return False
+                continue
 
             if resized:
                 if self.wait(
@@ -688,6 +753,16 @@ class AutomationWorker:
                             self.context
                         )
                     )
+
+                    if resized is None:
+                        # Do not feed a transient 0x0 Unity frame into boss
+                        # detection or the 3-second death timer.
+                        if self.wait(
+                            BOSS_OCR_INTERVAL,
+                            self.context.stop_event,
+                        ):
+                            break
+                        continue
 
                     if resized:
                         if self.wait(
