@@ -7,6 +7,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class AppSettings:
     game_source_path: str = ""
+    window_layout_mode: str = "arrange"
 
 
 class AppSettingsStorage:
@@ -20,7 +21,27 @@ class AppSettingsStorage:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid settings JSON: {self.path}") from exc
-        return AppSettings(game_source_path=str(data.get("game_source_path", "")))
+        layout = str(
+            data.get(
+                "window_layout_mode",
+                "arrange",
+            )
+        )
+        if layout not in {
+            "arrange",
+            "stack",
+        }:
+            layout = "arrange"
+
+        return AppSettings(
+            game_source_path=str(
+                data.get(
+                    "game_source_path",
+                    "",
+                )
+            ),
+            window_layout_mode=layout,
+        )
 
     def save(self, settings: AppSettings) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
