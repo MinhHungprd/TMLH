@@ -628,8 +628,12 @@ class BossDetector:
         )
 
     def reset_cycle(self):
-        """Reset per-boss-cycle detector state without dropping OCR code."""
+        """Reset per-boss-cycle state; keep both asset and OCR capability."""
         self._asset_miss_streak = 0
+        self._last_name_image = None
+        self._last_name_text = None
+        self._last_name_candidates = None
+        self._last_name_raw = None
 
     def _load_marker_template(self):
         if self._marker_template_loaded:
