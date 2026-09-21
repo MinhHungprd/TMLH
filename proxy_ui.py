@@ -14,12 +14,7 @@ from proxy_manager import (
     ProxySettings,
     parse_proxy_lines,
 )
-from ui_dialogs import (
-    keep_above_game,
-    showerror,
-    showinfo,
-    showwarning,
-)
+from ui_dialogs import keep_above_game
 from ui_theme import COLORS
 
 
@@ -409,24 +404,22 @@ class ProxySettingsDialog(ctk.CTkToplevel):
         try:
             settings = self._settings()
             self.on_save(settings)
-            showinfo(
-                "Proxy",
-                (
-                    f"Đã lưu {len(settings.proxies)} proxy.\n"
-                    f"Chế độ: {'TEST ít tab' if settings.test_mode else 'BÌNH THƯỜNG'}.\n"
-                    "Thiết lập sẽ được áp dụng khi bấm Áp dụng."
+            self.verify_status.configure(
+                text=(
+                    f"Đã lưu {len(settings.proxies)} proxy • "
+                    f"{'TEST MODE' if settings.test_mode else 'BÌNH THƯỜNG'} • "
+                    "chưa áp dụng"
                 ),
-                parent=self,
+                text_color=COLORS["green"],
             )
         except (
             ValueError,
             OSError,
             RuntimeError,
         ) as exc:
-            showerror(
-                "Proxy",
-                str(exc),
-                parent=self,
+            self.verify_status.configure(
+                text=f"Lỗi: {exc}",
+                text_color=COLORS["red"],
             )
 
     def _verify(self):
@@ -462,10 +455,9 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             OSError,
             RuntimeError,
         ) as exc:
-            showerror(
-                "Kiểm tra proxy",
-                str(exc),
-                parent=self,
+            self.verify_status.configure(
+                text=f"Kiểm tra lỗi: {exc}",
+                text_color=COLORS["red"],
             )
 
     def _verify_worker(
@@ -600,36 +592,6 @@ class ProxySettingsDialog(ctk.CTkToplevel):
 
         keep_above_game(self)
 
-        if fully_ok:
-            showinfo(
-                "Proxy OK",
-                (
-                    "SOCKS5 auth + CONNECT thành công và app-config "
-                    "ProxiFyre đang khớp với route hiện tại.\n\n"
-                    "Nếu vừa đổi route, hãy restart tab game để socket "
-                    "mới dùng cấu hình vừa áp dụng."
-                ),
-                parent=self,
-            )
-        elif all_proxy_ok:
-            showwarning(
-                "Proxy dùng được nhưng chưa áp dụng",
-                (
-                    "SOCKS5 kết nối thành công nhưng app-config "
-                    "ProxiFyre chưa khớp. Bấm Áp dụng, cho phép UAC "
-                    "nếu có, rồi Kiểm tra lại."
-                ),
-                parent=self,
-            )
-        else:
-            showerror(
-                "Proxy lỗi",
-                "\n".join(
-                    proxy_lines
-                ),
-                parent=self,
-            )
-
     def _show_verify_error(
         self,
         exc,
@@ -642,11 +604,6 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             text=f"Kiểm tra lỗi: {exc}",
             text_color=COLORS["red"],
         )
-        showerror(
-            "Kiểm tra proxy",
-            str(exc),
-            parent=self,
-        )
 
     def _apply(self):
         try:
@@ -654,22 +611,11 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             self.on_save(settings)
             self.on_apply(settings)
 
-            showinfo(
-                "Proxy",
-                (
-                    (
-                        "Đã gửi yêu cầu áp dụng TEST MODE: Profile 1 Direct, "
-                        "Profile 2 → Proxy 1, Profile 3 → Proxy 2...\n\n"
-                        "Tool sẽ tự kiểm tra SOCKS5 + app-config ngay sau đây. "
-                        "Khi báo Proxy OK, restart tab game để tạo connection mới."
-                        if settings.test_mode
-                        else
-                        "Đã gửi cấu hình route chuẩn và yêu cầu restart ProxiFyre. "
-                        "Tool sẽ tự kiểm tra ngay sau đây; nếu Windows hiện UAC, "
-                        "hãy cho phép trước khi kiểm tra hoàn tất."
-                    )
+            self.verify_status.configure(
+                text=(
+                    "Đã gửi yêu cầu áp dụng proxy • đang tự kiểm tra..."
                 ),
-                parent=self,
+                text_color=COLORS["amber"],
             )
 
             self.after(
@@ -681,8 +627,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             OSError,
             RuntimeError,
         ) as exc:
-            showerror(
-                "Proxy",
-                str(exc),
-                parent=self,
+            self.verify_status.configure(
+                text=f"Áp dụng lỗi: {exc}",
+                text_color=COLORS["red"],
             )
