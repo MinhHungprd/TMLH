@@ -28,12 +28,14 @@ class BossDetector:
     """
     Boss presence detector based on OCR of the boss-name box.
 
-    Production scans only BOSS_NAME_ROI=(361, 27, 91, 18), OCRs one text
-    line, normalizes Vietnamese diacritics/common OCR confusions, then fuzzy
-    matches the result against the selected boss name.
+    Production scans only BOSS_NAME_ROI=(361, 27, 91, 18). The same ROI is
+    preprocessed in several lightweight ways, stacked into one small image,
+    and sent through ONE Tesseract process. OCR output is then fuzzy-matched
+    against the selected boss name.
 
-    The worker still owns the existing 1-second scan cadence and >=3-second
-    continuous miss confirmation before declaring the boss dead.
+    Negative OCR results are never cached: an identical difficult frame is
+    re-read on the next 1-second scan instead of repeating one bad OCR result.
+    Positive results may be cached while the pixels stay identical.
     """
 
     def __init__(
@@ -58,11 +60,11 @@ class BossDetector:
         self.now = now or time.monotonic
         self.last_debug = {}
 
-        # Cache the already-preprocessed OCR image. Boss names are static, so
-        # this avoids spawning another Tesseract process when the name pixels
-        # are unchanged between scans.
+        # Positive-only OCR cache.
         self._last_name_image = None
         self._last_name_text = None
+        self._last_name_candidates = None
+        self._last_name_raw = None
 
     @staticmethod
     def is_alive(text: str) -> bool:
@@ -97,14 +99,6 @@ class BossDetector:
 
     @staticmethod
     def normalize_boss_name(text: str) -> str:
-        """
-        Normalize OCR/name text for fuzzy comparison.
-
-        - remove Vietnamese accents
-        - map đ -> d
-        - collapse spaces/punctuation
-        - fix a few common OCR digit/letter confusions
-        """
         value = (
             BossDetector._clean_text(text)
             .casefold()
@@ -137,7 +131,7 @@ class BossDetector:
         )
 
     @staticmethod
-    def _match_metrics(
+    def _basic_match_metrics(
         observed: str,
         expected: str,
     ) -> tuple[float, float]:
@@ -168,6 +162,77 @@ class BossDetector:
         return ratio, coverage
 
     @classmethod
+    def _match_metrics(
+        cls,
+        observed: str,
+        expected: str,
+    ) -> tuple[float, float]:
+        """
+        Direct fuzzy score plus a small sliding-window recovery.
+
+        The local window handles OCR that adds junk before/after a partly
+        missing boss name, e.g. "_ Trm cho |" instead of "Trộm chó".
+        """
+        best_ratio, best_coverage = (
+            cls._basic_match_metrics(
+                observed,
+                expected,
+            )
+        )
+
+        if len(observed) <= len(expected) + 1:
+            return (
+                best_ratio,
+                best_coverage,
+            )
+
+        min_len = max(
+            BOSS_NAME_MIN_CHARS,
+            len(expected) - 2,
+        )
+        max_len = min(
+            len(observed),
+            len(expected) + 2,
+        )
+
+        for window_len in range(
+            min_len,
+            max_len + 1,
+        ):
+            for start in range(
+                0,
+                len(observed)
+                - window_len
+                + 1,
+            ):
+                part = observed[
+                    start:
+                    start + window_len
+                ]
+
+                ratio, coverage = (
+                    cls._basic_match_metrics(
+                        part,
+                        expected,
+                    )
+                )
+
+                if (
+                    ratio,
+                    coverage,
+                ) > (
+                    best_ratio,
+                    best_coverage,
+                ):
+                    best_ratio = ratio
+                    best_coverage = coverage
+
+        return (
+            best_ratio,
+            best_coverage,
+        )
+
+    @classmethod
     def match_selected_boss(
         cls,
         text: str,
@@ -179,13 +244,6 @@ class BossDetector:
         str,
         str,
     ]:
-        """
-        Fuzzy-match OCR output to the selected boss.
-
-        Missing characters are allowed. To reduce false positives, the
-        selected boss must both pass the ratio/coverage thresholds and be the
-        best-scoring known boss name.
-        """
         expected_label = (
             BOSS_NAME_LABELS.get(
                 selected_boss,
@@ -220,14 +278,15 @@ class BossDetector:
             )
         )
 
-        # Strong containment handles OCR dropping a prefix/suffix while still
-        # requiring a meaningful fraction of the expected name.
         containment = (
             (
                 observed in expected
                 or expected in observed
             )
-            and len(observed)
+            and min(
+                len(observed),
+                len(expected),
+            )
             / len(expected)
             >= BOSS_NAME_MATCH_COVERAGE
         )
@@ -283,48 +342,271 @@ class BossDetector:
         )
 
     @staticmethod
-    def _prepare_name_image(
+    def _white_background(
+        image,
+    ):
+        if float(
+            image.mean()
+        ) < 127.0:
+            return cv2.bitwise_not(
+                image
+            )
+        return image
+
+    @classmethod
+    def _prepare_name_variants(
+        cls,
         roi,
     ):
-        # 91x18 -> 364x72. A single preprocessed OCR attempt is intentionally
-        # used to avoid the former gray/binary/inverted multi-process burst.
+        """
+        Build three OCR views from the same tiny ROI.
+
+        All variants are handled inside one Tesseract process later, so this
+        improves robustness without reintroducing the old 3-process OCR burst.
+        """
+        scale = 6
+
         upscaled = cv2.resize(
             roi,
             (
-                BOSS_NAME_ROI[2] * 4,
-                BOSS_NAME_ROI[3] * 4,
+                BOSS_NAME_ROI[2] * scale,
+                BOSS_NAME_ROI[3] * scale,
             ),
             interpolation=cv2.INTER_CUBIC,
         )
 
+        # Variant 1: contrast-enhanced grayscale.
+        clahe = cv2.createCLAHE(
+            clipLimit=2.0,
+            tileGridSize=(4, 4),
+        )
+        enhanced = clahe.apply(
+            upscaled
+        )
+
+        # Variant 2: Otsu threshold.
         blurred = cv2.GaussianBlur(
-            upscaled,
+            enhanced,
             (3, 3),
             0,
         )
-
-        _, binary = cv2.threshold(
+        _, otsu = cv2.threshold(
             blurred,
             0,
             255,
             cv2.THRESH_BINARY
             + cv2.THRESH_OTSU,
         )
+        otsu = cls._white_background(
+            otsu
+        )
 
-        # Tesseract generally prefers dark text on a light background.
-        if float(binary.mean()) < 127.0:
-            binary = cv2.bitwise_not(
-                binary
+        # Variant 3: adaptive threshold is often better when the name has a
+        # glow/gradient or uneven UI background.
+        adaptive = cv2.adaptiveThreshold(
+            enhanced,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            7,
+        )
+        adaptive = cls._white_background(
+            adaptive
+        )
+
+        # Keep grayscale as a third genuinely different input. Invert only
+        # when the overall UI patch is dark so text remains dark-on-light.
+        gray = cls._white_background(
+            enhanced
+        )
+
+        variants = []
+
+        for image in (
+            gray,
+            otsu,
+            adaptive,
+        ):
+            variants.append(
+                cv2.copyMakeBorder(
+                    image,
+                    10,
+                    10,
+                    14,
+                    14,
+                    cv2.BORDER_CONSTANT,
+                    value=255,
+                )
             )
 
-        return cv2.copyMakeBorder(
-            binary,
-            8,
-            8,
-            12,
-            12,
-            cv2.BORDER_CONSTANT,
-            value=255,
+        return variants
+
+    @staticmethod
+    def _stack_name_variants(
+        variants,
+    ):
+        width = max(
+            image.shape[1]
+            for image in variants
+        )
+        separator_h = 18
+        rows = []
+
+        for index, image in enumerate(
+            variants
+        ):
+            if image.shape[1] < width:
+                image = cv2.copyMakeBorder(
+                    image,
+                    0,
+                    0,
+                    0,
+                    width - image.shape[1],
+                    cv2.BORDER_CONSTANT,
+                    value=255,
+                )
+
+            rows.append(image)
+
+            if index + 1 < len(
+                variants
+            ):
+                rows.append(
+                    np.full(
+                        (
+                            separator_h,
+                            width,
+                        ),
+                        255,
+                        dtype=np.uint8,
+                    )
+                )
+
+        return np.vstack(rows)
+
+    @classmethod
+    def _ocr_candidates(
+        cls,
+        raw_text: str,
+    ):
+        candidates = []
+        seen = set()
+
+        for line in (
+            raw_text
+            or ""
+        ).splitlines():
+            cleaned = cls._clean_text(
+                line
+            )
+            normalized = (
+                cls.normalize_boss_name(
+                    cleaned
+                )
+            )
+
+            if (
+                not cleaned
+                or not normalized
+                or normalized in seen
+            ):
+                continue
+
+            seen.add(
+                normalized
+            )
+            candidates.append(
+                cleaned
+            )
+
+        whole = cls._clean_text(
+            raw_text
+        )
+        whole_norm = (
+            cls.normalize_boss_name(
+                whole
+            )
+        )
+
+        if (
+            whole
+            and whole_norm
+            and whole_norm not in seen
+        ):
+            candidates.append(
+                whole
+            )
+
+        return candidates
+
+    @classmethod
+    def _choose_candidate(
+        cls,
+        candidates,
+        selected_boss,
+    ):
+        if not candidates:
+            expected = (
+                cls.normalize_boss_name(
+                    BOSS_NAME_LABELS.get(
+                        selected_boss,
+                        selected_boss or "",
+                    )
+                )
+            )
+            return (
+                "",
+                False,
+                0.0,
+                0.0,
+                "",
+                expected,
+            )
+
+        ranked = []
+
+        for candidate in candidates:
+            (
+                matched,
+                ratio,
+                coverage,
+                observed,
+                expected,
+            ) = cls.match_selected_boss(
+                candidate,
+                selected_boss,
+            )
+
+            ranked.append(
+                (
+                    bool(matched),
+                    ratio,
+                    coverage,
+                    len(observed),
+                    candidate,
+                    observed,
+                    expected,
+                )
+            )
+
+        best = max(
+            ranked,
+            key=lambda item: (
+                item[0],
+                item[1],
+                item[2],
+                item[3],
+            ),
+        )
+
+        return (
+            best[4],
+            best[0],
+            best[1],
+            best[2],
+            best[5],
+            best[6],
         )
 
     def _capture_name_roi(
@@ -405,7 +687,7 @@ class BossDetector:
         self,
         context,
     ) -> str:
-        # Keep the public method name to avoid changing worker integration.
+        # Public name kept to avoid changing worker integration.
         with perf_timer(
             "vision_ms"
         ):
@@ -431,10 +713,21 @@ class BossDetector:
                 "game client area"
             )
 
-        ocr_image = (
-            self._prepare_name_image(
+        variants = (
+            self._prepare_name_variants(
                 roi
             )
+        )
+        composite = (
+            self._stack_name_variants(
+                variants
+            )
+        )
+
+        selected_boss = getattr(
+            context,
+            "selected_boss",
+            "",
         )
 
         cache_hit = (
@@ -443,13 +736,22 @@ class BossDetector:
             and self._last_name_text
             is not None
             and np.array_equal(
-                ocr_image,
+                composite,
                 self._last_name_image,
             )
         )
 
         if cache_hit:
-            text = self._last_name_text
+            raw_text = (
+                self._last_name_raw
+                or self._last_name_text
+            )
+            candidates = list(
+                self._last_name_candidates
+                or [
+                    self._last_name_text
+                ]
+            )
             source = "name_cache"
         else:
             if self.ocr is None:
@@ -457,43 +759,66 @@ class BossDetector:
 
             if hasattr(
                 self.ocr,
+                "read_text_block",
+            ):
+                raw_text = (
+                    self.ocr
+                    .read_text_block(
+                        composite
+                    )
+                )
+                source = "name_ocr_block"
+            elif hasattr(
+                self.ocr,
                 "read_text",
             ):
+                # Compatibility with injected OCR test doubles.
                 raw_text = self.ocr.read_text(
-                    ocr_image
+                    variants[0]
                 )
+                source = "name_ocr"
             else:
-                # Compatibility with lightweight injected OCR test doubles.
                 raw_text = self.ocr.read(
-                    ocr_image
+                    variants[0]
                 )
+                source = "name_ocr"
 
-            text = self._clean_text(
-                raw_text
+            candidates = (
+                self._ocr_candidates(
+                    raw_text
+                )
             )
-
-            self._last_name_image = (
-                ocr_image.copy()
-            )
-            self._last_name_text = text
-            source = "name_ocr"
-
-        selected_boss = getattr(
-            context,
-            "selected_boss",
-            "",
-        )
 
         (
+            text,
             name_alive,
             name_ratio,
             name_coverage,
             normalized_text,
             expected_name,
-        ) = self.match_selected_boss(
-            text,
+        ) = self._choose_candidate(
+            candidates,
             selected_boss,
         )
+
+        if name_alive:
+            # Cache only a confirmed positive. A bad/empty OCR result is
+            # deliberately NOT cached, so the next scan gets a fresh read.
+            self._last_name_image = (
+                composite.copy()
+            )
+            self._last_name_text = text
+            self._last_name_candidates = (
+                list(candidates)
+            )
+            self._last_name_raw = (
+                raw_text
+            )
+        elif not cache_hit:
+            self._last_name_image = None
+            self._last_name_text = None
+            self._last_name_candidates = None
+            self._last_name_raw = None
 
         self.last_debug = {
             "raw_size": (
@@ -507,6 +832,12 @@ class BossDetector:
             ),
             "chosen": source,
             "text": text,
+            "ocr_raw": self._clean_text(
+                raw_text
+            ),
+            "ocr_candidates": list(
+                candidates
+            ),
             "name_text": text,
             "name_normalized": (
                 normalized_text
@@ -524,19 +855,14 @@ class BossDetector:
             ),
             "name_alive": name_alive,
             "cache_hit": cache_hit,
-            # Keep old debug keys present so logging/custom tooling does not
-            # crash while the detector strategy changes.
-            "asset_alive": False,
-            "asset_score": 0.0,
-            "asset_miss_streak": 0,
-            "visual_glyphs": 0,
-            "visual_alive": False,
             "alive": name_alive,
             "attempts": [
                 (
                     source,
-                    text,
+                    candidate,
                 )
+                for candidate
+                in candidates
             ],
             "debug_dir": None,
         }
