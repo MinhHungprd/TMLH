@@ -119,9 +119,10 @@ def discover_game_remotes(
 
     :1002 remains the preferred known gameplay port, but it is no longer a
     hard requirement. Different servers/routes can expose another remote
-    port. The known login socket :8001 is excluded; remaining ESTABLISHED
-    sockets are passed to the Frida hook, which identifies the real gameplay
-    socket from game-protocol-shaped outgoing traffic.
+    port. A dedicated non-login socket is preferred; if none exists, the
+    established :8001 connection is retained as a last-resort candidate.
+    Frida identifies the real gameplay socket from game-protocol-shaped
+    outgoing traffic.
     """
     remotes = _established_remotes(
         process
