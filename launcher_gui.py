@@ -1566,10 +1566,12 @@ class LauncherApp(ctk.CTk):
                 )
                 self.after(
                     0,
-                    showerror,
-                    "Auto Login",
-                    str(exc),
-                    parent=self,
+                    lambda message=str(exc):
+                    showerror(
+                        "Auto Login",
+                        message,
+                        parent=self,
+                    ),
                 )
 
             finally:
@@ -1618,6 +1620,10 @@ class LauncherApp(ctk.CTk):
         self,
         profile_id,
     ):
+        self.creation_events.pop(
+            profile_id,
+            None,
+        )
         self._auto_login_active.discard(
             profile_id
         )
@@ -2028,9 +2034,19 @@ class LauncherApp(ctk.CTk):
         self.controller.stop_selected(profile_ids)
 
         for profile_id in profile_ids:
+            pending = self.creation_events.get(
+                profile_id
+            )
+            if pending is not None:
+                pending.set()
+
             worker = self.controller.workers.get(profile_id)
 
             if worker is None:
+                if pending is not None:
+                    self.statuses[
+                        profile_id
+                    ] = "Stopping"
                 continue
 
             hwnd = worker.context.window_handle
