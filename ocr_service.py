@@ -1,8 +1,11 @@
 from pathlib import Path
 import shutil
 import threading
+import time
 
 import pytesseract
+
+from perf_metrics import record_perf_ms
 
 
 # Tesseract starts an external process per OCR call. Limiting concurrent
@@ -48,8 +51,34 @@ class OcrService:
         )
 
     def read(self, image):
-        with _OCR_SEMAPHORE:
-            return pytesseract.image_to_string(
-                image,
-                config=self.config,
+        wait_started = time.perf_counter()
+        _OCR_SEMAPHORE.acquire()
+
+        try:
+            record_perf_ms(
+                "wait_ocr_ms",
+                (
+                    time.perf_counter()
+                    - wait_started
+                )
+                * 1000.0,
             )
+
+            ocr_started = time.perf_counter()
+
+            try:
+                return pytesseract.image_to_string(
+                    image,
+                    config=self.config,
+                )
+            finally:
+                record_perf_ms(
+                    "ocr_ms",
+                    (
+                        time.perf_counter()
+                        - ocr_started
+                    )
+                    * 1000.0,
+                )
+        finally:
+            _OCR_SEMAPHORE.release()
