@@ -79,3 +79,62 @@ def test_native_asset_scan_crops_small_regions_without_full_frame_resize():
         167,
     )
     assert checks[2].detected is False
+
+
+
+def test_check_single_signal_scales_login_ready_marker():
+    from profile_models import ProfileRuntimeContext
+
+    ctx = ProfileRuntimeContext(
+        "id",
+        "p",
+        "path",
+        "trom_cho",
+        480,
+        270,
+    )
+    ctx.window_handle = 9
+
+    detector = GameStateDetector(
+        lambda name, roi:
+        name == "s1"
+    )
+
+    check = detector.check_signal(
+        ctx,
+        "s1",
+    )
+
+    assert check.detected is True
+    assert check.action is None
+
+
+def test_check_single_start_signal_returns_scaled_center():
+    from profile_models import ProfileRuntimeContext
+
+    ctx = ProfileRuntimeContext(
+        "id",
+        "p",
+        "path",
+        "trom_cho",
+        480,
+        270,
+    )
+    ctx.window_handle = 9
+
+    detector = GameStateDetector(
+        lambda name, roi:
+        name == "s3"
+    )
+
+    check = detector.check_signal(
+        ctx,
+        "s3",
+    )
+
+    assert check.detected is True
+    assert check.action == CLICK_CENTER
+    assert check.coordinates == (
+        239,
+        226,
+    )
