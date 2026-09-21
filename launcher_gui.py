@@ -360,6 +360,9 @@ class LauncherApp(ctk.CTk):
         self.source = tk.StringVar(value=settings.game_source_path)
         self.sort_mode = tk.StringVar(value="A→Z")
         self.search_text = tk.StringVar()
+        self.status_filter = tk.StringVar(
+            value="Tất cả"
+        )
         self.batch_size = tk.StringVar(
             value="480x270"
         )
@@ -761,6 +764,34 @@ class LauncherApp(ctk.CTk):
             lambda *_args: self._refresh(),
         )
 
+        self.status_filter_combo = ctk.CTkComboBox(
+            top,
+            variable=self.status_filter,
+            values=(
+                "Tất cả",
+                "Ready",
+                "Đang chạy",
+                "Chưa đăng nhập",
+                "Lỗi",
+            ),
+            width=116,
+            height=30,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            dropdown_fg_color=COLORS["surface_alt"],
+            dropdown_hover_color=COLORS["surface_soft"],
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=11),
+            dropdown_font=ctk.CTkFont(size=11),
+            command=lambda _value: self._refresh(),
+        )
+        self.status_filter_combo.grid(
+            row=0,
+            column=2,
+            sticky="e",
+            padx=(5, 3),
+        )
+
         self.sort_combo = ctk.CTkComboBox(
             top,
             variable=self.sort_mode,
@@ -778,9 +809,9 @@ class LauncherApp(ctk.CTk):
         )
         self.sort_combo.grid(
             row=0,
-            column=2,
+            column=3,
             sticky="e",
-            padx=(5, 2),
+            padx=(3, 2),
         )
 
         header = ctk.CTkFrame(
@@ -1513,6 +1544,53 @@ class LauncherApp(ctk.CTk):
                     in self._runtime_status(
                         profile
                     ).casefold()
+                )
+            ]
+
+        status_filter = (
+            self.status_filter.get()
+            .strip()
+        )
+
+        if status_filter != "Tất cả":
+            def include_status(profile):
+                status = self._runtime_status(
+                    profile
+                ).casefold()
+
+                if status_filter == "Ready":
+                    return status == "ready"
+
+                if status_filter == "Đang chạy":
+                    return status not in {
+                        "ready",
+                        "stopped",
+                        "chưa đăng nhập",
+                        "error",
+                        "error / missing files",
+                    }
+
+                if status_filter == "Chưa đăng nhập":
+                    return (
+                        "chưa đăng nhập"
+                        in status
+                    )
+
+                if status_filter == "Lỗi":
+                    return (
+                        "error"
+                        in status
+                        or "missing"
+                        in status
+                    )
+
+                return True
+
+            profiles = [
+                profile
+                for profile in profiles
+                if include_status(
+                    profile
                 )
             ]
 
