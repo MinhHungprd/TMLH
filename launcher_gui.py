@@ -341,6 +341,7 @@ class LauncherApp(ctk.CTk):
 
         self.source = tk.StringVar(value=settings.game_source_path)
         self.profile_name = tk.StringVar()
+        self.login_profile = tk.StringVar()
         self.login_username = tk.StringVar()
         self.login_password = tk.StringVar()
         self.login_server = tk.StringVar(
@@ -365,8 +366,8 @@ class LauncherApp(ctk.CTk):
         self._log_flush_after_id = None
 
         self.title(f"{APP_NAME} - Profile Bot")
-        self.geometry("480x660")
-        self.minsize(460, 600)
+        self.geometry("620x720")
+        self.minsize(580, 650)
         self.configure(fg_color=COLORS["bg"])
         self.attributes("-topmost", True)
 
@@ -535,103 +536,118 @@ class LauncherApp(ctk.CTk):
         self.source_status.grid(row=0, column=3, padx=(4, 8), pady=7)
 
     def _build_create_bar(self):
-        card = CompactCard(self, height=86)
-        card.grid(row=2, column=0, sticky="ew", padx=8, pady=3)
+        card = CompactCard(
+            self,
+            height=154,
+        )
+        card.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=8,
+            pady=3,
+        )
         card.grid_propagate(False)
-        card.grid_columnconfigure(1, weight=1)
-        card.grid_columnconfigure(2, weight=1)
+
+        for column in range(6):
+            card.grid_columnconfigure(
+                column,
+                weight=1 if column in (1, 2, 3) else 0,
+            )
 
         ctk.CTkLabel(
             card,
-            text="👤 Profile",
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=10, weight="bold"),
-            width=64,
+            text="1. Tạo profile",
+            text_color=COLORS["cyan"],
+            font=ctk.CTkFont(
+                size=10,
+                weight="bold",
+            ),
+            width=92,
             anchor="w",
-        ).grid(row=0, column=0, padx=(10, 4), pady=(7, 3))
+        ).grid(
+            row=0,
+            column=0,
+            padx=(10, 5),
+            pady=(8, 3),
+            sticky="w",
+        )
 
         self.profile_entry = ctk.CTkEntry(
             card,
             textvariable=self.profile_name,
-            height=27,
+            height=28,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
-            placeholder_text="Tên profile...",
+            placeholder_text="Tên profile mới...",
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=9),
         )
         self.profile_entry.grid(
             row=0,
             column=1,
-            columnspan=2,
+            columnspan=3,
             sticky="ew",
             padx=3,
-            pady=(6, 2),
+            pady=(7, 3),
         )
 
         ctk.CTkButton(
             card,
-            text="+",
-            width=32,
-            height=27,
+            text="Tạo profile",
+            width=90,
+            height=28,
             fg_color=COLORS["blue"],
             hover_color=COLORS["blue_hover"],
             command=self._create,
-        ).grid(row=0, column=3, padx=3, pady=(6, 2))
-
-        ctk.CTkButton(
-            card,
-            text="Mở tay",
-            width=54,
-            height=27,
-            fg_color=COLORS["purple"],
-            hover_color=COLORS["purple_hover"],
-            command=self._continue_login,
-        ).grid(row=0, column=4, padx=(3, 8), pady=(6, 2))
+        ).grid(
+            row=0,
+            column=4,
+            columnspan=2,
+            padx=(5, 10),
+            pady=(7, 3),
+            sticky="e",
+        )
 
         ctk.CTkLabel(
             card,
-            text="🔐",
-            text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=10),
-            width=28,
-        ).grid(row=1, column=0, padx=(8, 1), pady=(2, 7))
+            text="2. Đăng nhập",
+            text_color=COLORS["green"],
+            font=ctk.CTkFont(
+                size=10,
+                weight="bold",
+            ),
+            width=92,
+            anchor="w",
+        ).grid(
+            row=1,
+            column=0,
+            padx=(10, 5),
+            pady=3,
+            sticky="w",
+        )
 
-        self.login_username_entry = ctk.CTkEntry(
+        self.login_profile_combo = ctk.CTkComboBox(
             card,
-            textvariable=self.login_username,
-            height=27,
+            variable=self.login_profile,
+            values=(),
+            width=130,
+            height=28,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
-            placeholder_text="Tài khoản",
+            dropdown_fg_color=COLORS["surface_alt"],
             text_color=COLORS["text"],
             font=ctk.CTkFont(size=8),
+            dropdown_font=ctk.CTkFont(size=8),
+            command=self._choose_login_profile,
         )
-        self.login_username_entry.grid(
+        self.login_profile_combo.grid(
             row=1,
             column=1,
+            columnspan=2,
             sticky="ew",
             padx=3,
-            pady=(2, 7),
-        )
-
-        self.login_password_entry = ctk.CTkEntry(
-            card,
-            textvariable=self.login_password,
-            height=27,
-            fg_color=COLORS["input"],
-            border_color=COLORS["border_bright"],
-            placeholder_text="Mật khẩu",
-            show="•",
-            text_color=COLORS["text"],
-            font=ctk.CTkFont(size=8),
-        )
-        self.login_password_entry.grid(
-            row=1,
-            column=2,
-            sticky="ew",
-            padx=3,
-            pady=(2, 7),
+            pady=3,
         )
 
         self.login_server_combo = ctk.CTkComboBox(
@@ -640,8 +656,8 @@ class LauncherApp(ctk.CTk):
             values=tuple(
                 SERVER_LABELS.values()
             ),
-            width=86,
-            height=27,
+            width=100,
+            height=28,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             dropdown_fg_color=COLORS["surface_alt"],
@@ -652,24 +668,139 @@ class LauncherApp(ctk.CTk):
         self.login_server_combo.grid(
             row=1,
             column=3,
+            sticky="ew",
             padx=3,
-            pady=(2, 7),
+            pady=3,
+        )
+
+        ctk.CTkLabel(
+            card,
+            text="Chọn profile + server trước",
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(size=8),
+            anchor="w",
+        ).grid(
+            row=1,
+            column=4,
+            columnspan=2,
+            sticky="w",
+            padx=(6, 10),
+            pady=3,
+        )
+
+        self.login_username_entry = ctk.CTkEntry(
+            card,
+            textvariable=self.login_username,
+            height=28,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            placeholder_text="Tài khoản",
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=8),
+        )
+        self.login_username_entry.grid(
+            row=2,
+            column=1,
+            sticky="ew",
+            padx=3,
+            pady=3,
+        )
+
+        self.login_password_entry = ctk.CTkEntry(
+            card,
+            textvariable=self.login_password,
+            height=28,
+            fg_color=COLORS["input"],
+            border_color=COLORS["border_bright"],
+            placeholder_text="Mật khẩu",
+            show="•",
+            text_color=COLORS["text"],
+            font=ctk.CTkFont(size=8),
+        )
+        self.login_password_entry.grid(
+            row=2,
+            column=2,
+            columnspan=2,
+            sticky="ew",
+            padx=3,
+            pady=3,
         )
 
         ctk.CTkButton(
             card,
-            text="Login",
-            width=54,
-            height=27,
+            text="▶ Tự đăng nhập + tự lưu",
+            height=28,
             fg_color=COLORS["green"],
             hover_color=COLORS["green_hover"],
             text_color=COLORS["black"],
+            font=ctk.CTkFont(
+                size=9,
+                weight="bold",
+            ),
             command=self._auto_login_selected,
         ).grid(
-            row=1,
+            row=2,
             column=4,
-            padx=(3, 8),
-            pady=(2, 7),
+            columnspan=2,
+            sticky="ew",
+            padx=(5, 10),
+            pady=3,
+        )
+
+        ctk.CTkLabel(
+            card,
+            text=(
+                "Tự động: mở game → chọn server → nhập TK/MK → đăng nhập "
+                "→ bấm Bắt đầu → tự lưu auth. Không cần xác nhận thêm."
+            ),
+            text_color=COLORS["muted"],
+            font=ctk.CTkFont(size=8),
+            anchor="w",
+        ).grid(
+            row=3,
+            column=0,
+            columnspan=4,
+            sticky="w",
+            padx=(10, 5),
+            pady=(3, 8),
+        )
+
+        manual = ctk.CTkFrame(
+            card,
+            fg_color="transparent",
+        )
+        manual.grid(
+            row=3,
+            column=4,
+            columnspan=2,
+            sticky="e",
+            padx=(5, 10),
+            pady=(3, 7),
+        )
+
+        ctk.CTkButton(
+            manual,
+            text="Mở thủ công",
+            width=84,
+            height=24,
+            fg_color=COLORS["surface_soft"],
+            hover_color=COLORS["border_bright"],
+            command=self._continue_login,
+        ).pack(
+            side="left",
+            padx=(0, 4),
+        )
+
+        ctk.CTkButton(
+            manual,
+            text="Xác nhận đã đăng nhập",
+            width=116,
+            height=24,
+            fg_color=COLORS["surface_soft"],
+            hover_color=COLORS["border_bright"],
+            command=self._confirm_login,
+        ).pack(
+            side="left",
         )
 
     def _build_profile_panel(self):
@@ -1128,7 +1259,7 @@ class LauncherApp(ctk.CTk):
 
         try:
             self.controller.manager.check_clone(profile)
-            return "Ready" if profile.login_ready else "Waiting Login"
+            return "Ready" if profile.login_ready else "Chưa đăng nhập"
         except MissingGameFilesError:
             return "Error / Missing Files"
 
@@ -1179,6 +1310,46 @@ class LauncherApp(ctk.CTk):
         self.selected_label.configure(
             text=f"Đã chọn {len(self.checked)} profile"
         )
+
+        profile_names = [
+            profile.profile_name
+            for profile in profiles
+        ]
+
+        if hasattr(
+            self,
+            "login_profile_combo",
+        ):
+            self.login_profile_combo.configure(
+                values=profile_names,
+            )
+
+            current_login_profile = (
+                self.login_profile.get()
+                .strip()
+            )
+
+            if current_login_profile not in profile_names:
+                selected = next(
+                    (
+                        profile
+                        for profile in profiles
+                        if profile.profile_id
+                        == self.selected_profile_id
+                    ),
+                    None,
+                )
+
+                if selected is not None:
+                    self.login_profile.set(
+                        selected.profile_name
+                    )
+                elif profiles:
+                    self.login_profile.set(
+                        profiles[0].profile_name
+                    )
+                else:
+                    self.login_profile.set("")
 
         boss_values = tuple(
             BOSS_LABELS.get(key, key)
@@ -1244,6 +1415,17 @@ class LauncherApp(ctk.CTk):
 
     def _focus_profile(self, profile_id):
         self.selected_profile_id = profile_id
+
+        try:
+            profile = self.controller.get(
+                profile_id
+            )
+            self.login_profile.set(
+                profile.profile_name
+            )
+        except StopIteration:
+            pass
+
         self._load_login_fields(
             profile_id
         )
@@ -1253,6 +1435,15 @@ class LauncherApp(ctk.CTk):
         if enabled:
             self.checked.add(profile_id)
             self.selected_profile_id = profile_id
+            try:
+                profile = self.controller.get(
+                    profile_id
+                )
+                self.login_profile.set(
+                    profile.profile_name
+                )
+            except StopIteration:
+                pass
             self._load_login_fields(
                 profile_id
             )
@@ -1275,6 +1466,89 @@ class LauncherApp(ctk.CTk):
         if not self.selected_profile_id:
             raise ValueError("Hãy chọn một profile trước")
         return self.selected_profile_id
+
+
+    def _choose_login_profile(
+        self,
+        profile_name,
+    ):
+        profile = next(
+            (
+                item
+                for item
+                in self.controller.profiles
+                if item.profile_name
+                == profile_name
+            ),
+            None,
+        )
+
+        if profile is None:
+            return
+
+        self.selected_profile_id = (
+            profile.profile_id
+        )
+        self._load_login_fields(
+            profile.profile_id
+        )
+        self._refresh()
+
+    def _selected_login_profile_id(
+        self,
+    ):
+        requested = (
+            self.login_profile.get()
+            .strip()
+        )
+
+        if requested:
+            profile = next(
+                (
+                    item
+                    for item
+                    in self.controller.profiles
+                    if item.profile_name
+                    == requested
+                ),
+                None,
+            )
+
+            if profile is not None:
+                self.selected_profile_id = (
+                    profile.profile_id
+                )
+                return profile.profile_id
+
+        if self.selected_profile_id:
+            try:
+                profile = self.controller.get(
+                    self.selected_profile_id
+                )
+                self.login_profile.set(
+                    profile.profile_name
+                )
+                return profile.profile_id
+            except StopIteration:
+                pass
+
+        if len(
+            self.controller.profiles
+        ) == 1:
+            profile = (
+                self.controller.profiles[0]
+            )
+            self.selected_profile_id = (
+                profile.profile_id
+            )
+            self.login_profile.set(
+                profile.profile_name
+            )
+            return profile.profile_id
+
+        raise ValueError(
+            "Hãy chọn profile trong ô '2. Đăng nhập' trước"
+        )
 
     def _load_login_fields(
         self,
@@ -1362,7 +1636,7 @@ class LauncherApp(ctk.CTk):
     def _auto_login_selected(self):
         try:
             profile_id = (
-                self._selected_profile()
+                self._selected_login_profile_id()
             )
             profile = self.controller.get(
                 profile_id
@@ -1821,6 +2095,9 @@ class LauncherApp(ctk.CTk):
             self.profile_name.set("")
             self.statuses[profile.profile_id] = "Creating"
             self.selected_profile_id = profile.profile_id
+            self.login_profile.set(
+                profile.profile_name
+            )
             self.login_username.set("")
             self.login_password.set("")
             self.login_server.set(
@@ -1832,70 +2109,100 @@ class LauncherApp(ctk.CTk):
         except (ValueError, OSError) as exc:
             showerror("Tạo profile", str(exc), parent=self)
 
-    def _run_creation(self, profile, source, repair):
+    def _run_creation(
+        self,
+        profile,
+        source,
+        repair,
+    ):
         cancel = threading.Event()
-        self.creation_events[profile.profile_id] = cancel
+        self.creation_events[
+            profile.profile_id
+        ] = cancel
 
         def work():
             try:
-                self.after(0, self._status, profile.profile_id, "Copying Game")
+                self.after(
+                    0,
+                    self._status,
+                    profile.profile_id,
+                    "Copying Game",
+                )
 
                 if repair:
-                    self.controller.repair_profile(profile.profile_id, source)
+                    self.controller.repair_profile(
+                        profile.profile_id,
+                        source,
+                    )
                 else:
-                    self.controller.manager.clone_profile(profile, source)
+                    self.controller.manager.clone_profile(
+                        profile,
+                        source,
+                    )
 
                 if cancel.is_set():
                     return
 
-                try:
-                    self._ensure_proxy_routing_current()
-                except (ValueError, RuntimeError):
-                    self.after(
-                        0,
-                        self._status,
-                        profile.profile_id,
-                        "Proxy Apply Required",
-                    )
-                    self.after(
-                        0,
-                        self._log,
-                        profile.profile_id,
-                        "WARN",
-                        "Profile đã tạo. Hãy mở Proxy > Áp dụng rồi bấm Mở để đăng nhập.",
-                    )
-                    return
-
-                self.after(0, self._status, profile.profile_id, "Launching Game")
-                _pid, _hwnd, launched = acquire_profile_window(
-                    profile.game_path,
-                    cancel,
-                    window_title=profile.profile_name,
+                self.after(
+                    0,
+                    self._creation_ready_for_login,
+                    profile.profile_id,
+                    profile.profile_name,
                 )
-                set_window_topmost(_hwnd, True)
-
-                if cancel.is_set():
-                    return
-
-                if launched:
-                    self.after(0, self._status, profile.profile_id, "Waiting Startup")
-                    if cancel.wait(10):
-                        return
-
-                self.after(0, self._status, profile.profile_id, "Waiting Login")
 
             except Exception as exc:
-                self.after(0, self._error, profile.profile_id, exc)
+                self.after(
+                    0,
+                    self._error,
+                    profile.profile_id,
+                    exc,
+                )
+            finally:
+                self.creation_events.pop(
+                    profile.profile_id,
+                    None,
+                )
 
         threading.Thread(
             target=work,
             daemon=True,
-            name=f"create-{profile.profile_id}",
+            name=(
+                f"create-"
+                f"{profile.profile_id}"
+            ),
         ).start()
+
+    def _creation_ready_for_login(
+        self,
+        profile_id,
+        profile_name,
+    ):
+        self.selected_profile_id = (
+            profile_id
+        )
+        self.login_profile.set(
+            profile_name
+        )
+        self._status(
+            profile_id,
+            "Chưa đăng nhập",
+        )
+        self._log(
+            profile_name,
+            "SUCCESS",
+            (
+                "Profile đã tạo xong. "
+                "Nhập tài khoản + mật khẩu ở mục '2. Đăng nhập' "
+                "rồi bấm 'Tự đăng nhập + tự lưu'."
+            ),
+        )
+        self._refresh()
 
     def _continue_login(self):
         try:
-            self._continue_login_for(self._selected_profile())
+            self._continue_login_for(
+                self._selected_login_profile_id()
+            )
         except (ValueError, OSError, RuntimeError) as exc:
             showerror("Mở game", str(exc), parent=self)
 
@@ -1933,7 +2240,7 @@ class LauncherApp(ctk.CTk):
                             return
 
                 if not cancel.is_set():
-                    self.after(0, self._status, profile.profile_id, "Waiting Login")
+                    self.after(0, self._status, profile.profile_id, "Đăng nhập thủ công")
 
             except Exception as exc:
                 self.after(0, self._error, profile.profile_id, exc)
@@ -1946,11 +2253,12 @@ class LauncherApp(ctk.CTk):
 
     def _confirm_login(self):
         try:
-            profile_id = self._selected_profile()
+            profile_id = self._selected_login_profile_id()
 
-            if self.statuses.get(profile_id) != "Waiting Login":
+            if self.statuses.get(profile_id) != "Đăng nhập thủ công":
                 raise ValueError(
-                    "Hãy mở profile và chờ game khởi động trước khi xác nhận đăng nhập"
+                    "Bước thủ công: bấm 'Mở thủ công', đăng nhập trong game, "
+                    "sau đó bấm 'Xác nhận đã đăng nhập'"
                 )
 
             profile = self.controller.confirm_login(profile_id)
