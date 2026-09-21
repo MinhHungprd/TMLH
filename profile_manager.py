@@ -77,6 +77,7 @@ class ProfileManager:
             destination,
             ignore=shutil.ignore_patterns(
                 ".tmlh_profile_auth.bin",
+                ".tmlh_login_credentials.bin",
             ),
         )
 
@@ -99,6 +100,7 @@ class ProfileManager:
             dirs_exist_ok=True,
             ignore=shutil.ignore_patterns(
                 ".tmlh_profile_auth.bin",
+                ".tmlh_login_credentials.bin",
             ),
         )
 
