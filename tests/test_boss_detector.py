@@ -39,6 +39,7 @@ def test_read_hp_keeps_injected_full_frame_capture_contract():
         # Missing marker asset exercises the preserved immediate OCR
         # compatibility fallback.
         assets_dir=Path("missing-assets"),
+        ocr_fallback_enabled=True,
     )
 
     context = type(
@@ -108,6 +109,7 @@ def test_identical_roi_reuses_previous_ocr_result():
             dtype=np.uint8,
         ),
         roi_capture=lambda hwnd, base_roi: roi.copy(),
+        ocr_fallback_enabled=True,
     )
 
     context = type(
@@ -183,6 +185,7 @@ def test_default_debug_does_not_capture_full_frame(monkeypatch):
             )
         ),
         roi_capture=lambda hwnd, base_roi: roi.copy(),
+        ocr_fallback_enabled=True,
     )
 
     context = type(
@@ -277,6 +280,7 @@ def test_boss_marker_must_miss_three_scans_before_ocr_fallback():
             (484, 860),
             dtype=np.uint8,
         ),
+        ocr_fallback_enabled=True,
     )
 
     context = type(
@@ -305,3 +309,38 @@ def test_boss_marker_must_miss_three_scans_before_ocr_fallback():
         (88, 264),
     ]
     assert detector.last_debug["asset_miss_streak"] == 0
+
+
+
+def test_runtime_default_does_not_call_ocr_after_marker_misses():
+    calls = []
+
+    class OCR:
+        def read(self, image):
+            calls.append(image.shape)
+            return "HP 128"
+
+    detector = BossDetector(
+        ocr=OCR(),
+        capture=lambda hwnd: np.zeros(
+            (484, 860),
+            dtype=np.uint8,
+        ),
+    )
+
+    context = type(
+        "Context",
+        (),
+        {
+            "window_handle": 7,
+            "profile_id": "p1",
+        },
+    )()
+
+    for _ in range(5):
+        assert detector.read_hp(context) == ""
+
+    assert calls == []
+    assert detector.last_debug["chosen"] == "ocr_disabled"
+    assert detector.last_debug["asset_alive"] is False
+    assert detector.last_debug["asset_miss_streak"] >= 3
