@@ -200,7 +200,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             ),
             text_color=COLORS["text"],
             font=ctk.CTkFont(
-                size=10,
+                size=11,
                 weight="bold",
             ),
         ).grid(
