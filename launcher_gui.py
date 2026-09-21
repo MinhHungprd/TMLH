@@ -133,7 +133,23 @@ class ProfileController:
         server,
         source_path,
     ):
+        username = str(
+            username
+        ).strip()
+
         with self._storage_lock:
+            if any(
+                (
+                    item.account_username
+                    or item.profile_name
+                ).strip().casefold()
+                == username.casefold()
+                for item in self.profiles
+            ):
+                raise ValueError(
+                    f"Tài khoản đã tồn tại: {username}"
+                )
+
             profile = self.manager.prepare_profile(
                 username,
                 Path(source_path),
