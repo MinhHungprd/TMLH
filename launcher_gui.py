@@ -2533,7 +2533,37 @@ class LauncherApp(ctk.CTk):
     def _finish_delete(
         self,
         ids,
+        attempt=0,
     ):
+        waiting = [
+            profile_id
+            for profile_id in ids
+            if (
+                self.controller
+                ._worker_is_active(
+                    profile_id
+                )
+                or profile_id
+                in self._login_contexts
+            )
+        ]
+
+        if waiting and attempt < 8:
+            self._notify(
+                (
+                    f"Đang dừng {len(waiting)} tài khoản "
+                    "trước khi xóa..."
+                ),
+                "info",
+            )
+            self.after(
+                400,
+                self._finish_delete,
+                ids,
+                attempt + 1,
+            )
+            return
+
         deleted = 0
         failures = []
 
