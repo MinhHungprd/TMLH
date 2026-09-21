@@ -1118,22 +1118,26 @@ class LauncherApp(ctk.CTk):
         return result
 
     def _ensure_proxy_routing_current(self):
+        """
+        Proxy is opt-in.
+
+        Saving/editing proxy settings must never block normal game launch.
+        Until the user explicitly presses Apply, profiles continue using the
+        machine's normal network. If an already-applied config still matches,
+        it remains active as usual.
+        """
         settings = self.proxy_settings_store.load()
 
         if (
             not settings.proxies
             and not settings.proxifyre_path.strip()
         ):
-            return
+            return False
 
-        if not routing_config_matches(
+        return routing_config_matches(
             tuple(self.controller.profiles),
             settings,
-        ):
-            raise ValueError(
-                "Cấu hình proxy chưa được áp dụng cho danh sách profile hiện tại. "
-                "Mở Proxy và bấm 'Áp dụng' trước khi mở/start game."
-            )
+        )
 
     def _save_proxy_settings(self, settings):
         self.proxy_settings_store.save(
