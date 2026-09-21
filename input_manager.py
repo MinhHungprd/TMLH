@@ -221,6 +221,12 @@ class InputManager:
                     cls._set_clipboard_text(
                         previous
                     )
+                else:
+                    win32clipboard.OpenClipboard()
+                    try:
+                        win32clipboard.EmptyClipboard()
+                    finally:
+                        win32clipboard.CloseClipboard()
             except Exception:
                 pass
 
