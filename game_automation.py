@@ -8,6 +8,7 @@ import win32gui
 import win32process
 
 from automation_constants import (
+    ALIVE_DEBUG_LOG_INTERVAL,
     BOSS_DEAD_CONFIRM_SECONDS,
     BOSS_ENTER_WAIT,
     BOSS_OCR_INTERVAL,
@@ -15,6 +16,7 @@ from automation_constants import (
     BOSS_SCAN_STAGGER_SLOTS,
     BOSS_SCAN_STAGGER_STEP,
     GAME_START_WAIT,
+    GAME_STATE_POLL_INTERVAL,
     IN_GAME_CONFIRM_SECONDS,
 )
 
@@ -235,7 +237,8 @@ class AutomationWorker:
 
         # Diagnostic OCR logs are useful, but logging every alive scan from
         # many profiles wastes GUI/queue work. Dead-candidate scans still log
-        # every cycle; stable alive scans are sampled every 3 seconds.
+        # every cycle; stable alive scans are sampled less often to keep
+        # the GUI/log queue quiet when many profiles are running.
         self._last_alive_debug_log_at = float("-inf")
 
     def start(self):
@@ -484,7 +487,7 @@ class AutomationWorker:
             # ==========================================
 
             if self.wait(
-                0.25,
+                GAME_STATE_POLL_INTERVAL,
                 self.context.stop_event,
             ):
                 return False
@@ -838,7 +841,7 @@ class AutomationWorker:
                         or (
                             now
                             - self._last_alive_debug_log_at
-                            >= 3.0
+                            >= ALIVE_DEBUG_LOG_INTERVAL
                         )
                     )
 
