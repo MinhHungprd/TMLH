@@ -3336,6 +3336,51 @@ class LauncherApp(ctk.CTk):
     def _worker_log(self, profile_id, message):
         self._log(profile_id, "INFO", message)
 
+    @staticmethod
+    def _friendly_status(
+        value,
+    ):
+        normalized = str(
+            value
+        ).replace(
+            "_",
+            " ",
+        ).strip().casefold()
+
+        labels = {
+            "copying game": "Copy game",
+            "launching game": "Mở game",
+            "waiting startup": "Chờ startup",
+            "waiting game": "Chờ game",
+            "waiting gameplay socket": "Chờ socket",
+            "login select server": "Chọn server",
+            "login enter credentials": "Nhập TK/MK",
+            "login submitting": "Đăng nhập",
+            "login waiting start": "Chờ Start",
+            "entering boss": "Vào boss",
+            "waiting boss load": "Load boss",
+            "checking boss": "Check boss",
+            "boss alive": "Boss sống",
+            "boss dead confirming": "Xác nhận chết",
+            "boss dead": "Boss chết",
+            "exiting boss": "Thoát boss",
+            "waiting respawn": "Chờ hồi sinh",
+            "in game": "Đang chạy",
+            "stopping": "Đang dừng",
+            "stopped": "Đã dừng",
+            "ready": "Ready",
+            "error": "Lỗi",
+            "chưa đăng nhập": "Chưa đăng nhập",
+        }
+
+        return labels.get(
+            normalized,
+            str(value).replace(
+                "_",
+                " ",
+            ).title(),
+        )
+
     def _worker_status(self, profile_id, state):
         if state not in (
             "STOPPED",
@@ -3346,7 +3391,9 @@ class LauncherApp(ctk.CTk):
                 None,
             )
 
-        pretty = state.replace("_", " ").title()
+        pretty = self._friendly_status(
+            state
+        )
         self._apply_runtime_status(
             profile_id,
             pretty,
@@ -3378,7 +3425,9 @@ class LauncherApp(ctk.CTk):
     def _status(self, profile_id, state):
         self._apply_runtime_status(
             profile_id,
-            state,
+            self._friendly_status(
+                state
+            ),
         )
         self._log(profile_id, state)
 
