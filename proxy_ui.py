@@ -658,14 +658,15 @@ class ProxySettingsDialog(ctk.CTkToplevel):
                 "Proxy",
                 (
                     (
-                        "Đã áp dụng TEST MODE: Profile 1 Direct, "
+                        "Đã gửi yêu cầu áp dụng TEST MODE: Profile 1 Direct, "
                         "Profile 2 → Proxy 1, Profile 3 → Proxy 2...\n\n"
-                        "Nên restart các tab game đang mở để tạo connection mới. "
-                        "Test xong bỏ chọn Test và bấm Áp dụng để khôi phục route chuẩn."
+                        "Tool sẽ tự kiểm tra SOCKS5 + app-config ngay sau đây. "
+                        "Khi báo Proxy OK, restart tab game để tạo connection mới."
                         if settings.test_mode
                         else
-                        "Đã tạo cấu hình route chuẩn và gửi yêu cầu restart ProxiFyre. "
-                        "Nếu Windows hiện UAC, hãy cho phép để áp dụng."
+                        "Đã gửi cấu hình route chuẩn và yêu cầu restart ProxiFyre. "
+                        "Tool sẽ tự kiểm tra ngay sau đây; nếu Windows hiện UAC, "
+                        "hãy cho phép trước khi kiểm tra hoàn tất."
                     )
                 ),
                 parent=self,
