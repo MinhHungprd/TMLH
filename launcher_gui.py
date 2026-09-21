@@ -410,6 +410,7 @@ class LauncherApp(ctk.CTk):
         self._login_queue = []
         self._login_queue_active = False
         self._pending_delete_ids = ()
+        self._log_expanded = False
 
         # Worker OCR/debug logs are batched onto the Tk thread instead of
         # scheduling one GUI callback per profile per second.
@@ -1292,35 +1293,91 @@ class LauncherApp(ctk.CTk):
         )
 
     def _build_log_panel(self):
-        panel = CompactCard(self, height=96)
-        panel.grid(row=6, column=0, sticky="ew", padx=8, pady=3)
-        panel.grid_propagate(False)
-        panel.grid_columnconfigure(0, weight=1)
+        self.log_panel = CompactCard(
+            self,
+            height=42,
+        )
+        self.log_panel.grid(
+            row=6,
+            column=0,
+            sticky="ew",
+            padx=8,
+            pady=3,
+        )
+        self.log_panel.grid_propagate(
+            False
+        )
+        self.log_panel.grid_columnconfigure(
+            0,
+            weight=1,
+        )
 
-        top = ctk.CTkFrame(panel, fg_color="transparent", height=34)
-        top.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 3))
-        top.grid_columnconfigure(0, weight=1)
+        top = ctk.CTkFrame(
+            self.log_panel,
+            fg_color="transparent",
+            height=34,
+        )
+        top.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=12,
+            pady=(5, 3),
+        )
+        top.grid_columnconfigure(
+            0,
+            weight=1,
+        )
 
         ctk.CTkLabel(
             top,
-            text="▤  Nhật ký",
+            text="Nhật ký",
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=10, weight="bold"),
-        ).grid(row=0, column=0, sticky="w")
+            font=ctk.CTkFont(
+                size=12,
+                weight="bold",
+            ),
+        ).grid(
+            row=0,
+            column=0,
+            sticky="w",
+        )
 
         ctk.CTkButton(
             top,
-            text="Xóa log",
-            width=56,
-            height=22,
+            text="Xóa",
+            width=46,
+            height=24,
             fg_color=COLORS["surface_soft"],
             hover_color=COLORS["border_bright"],
+            font=ctk.CTkFont(size=11),
             command=self._clear_log,
-        ).grid(row=0, column=1, sticky="e")
+        ).grid(
+            row=0,
+            column=1,
+            padx=4,
+        )
+
+        self.log_toggle_button = (
+            ctk.CTkButton(
+                top,
+                text="Mở",
+                width=46,
+                height=24,
+                fg_color=COLORS["surface_soft"],
+                hover_color=COLORS["border_bright"],
+                font=ctk.CTkFont(size=11),
+                command=self._toggle_log_panel,
+            )
+        )
+        self.log_toggle_button.grid(
+            row=0,
+            column=2,
+        )
 
         self.log = ctk.CTkTextbox(
-            panel,
-            height=54,
+            self.log_panel,
+            height=86,
             fg_color=COLORS["black"],
             border_width=1,
             border_color=COLORS["border"],
@@ -1329,16 +1386,59 @@ class LauncherApp(ctk.CTk):
             font=("Consolas", 11),
             wrap="word",
         )
-        self.log.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
-        self.log.configure(state="disabled")
+        self.log.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=10,
+            pady=(0, 10),
+        )
+        self.log.grid_remove()
+        self.log.configure(
+            state="disabled"
+        )
 
         try:
-            self.log._textbox.tag_configure("info", foreground=COLORS["blue"])
-            self.log._textbox.tag_configure("success", foreground=COLORS["green"])
-            self.log._textbox.tag_configure("warning", foreground=COLORS["amber"])
-            self.log._textbox.tag_configure("error", foreground=COLORS["red"])
+            self.log._textbox.tag_configure(
+                "info",
+                foreground=COLORS["blue"],
+            )
+            self.log._textbox.tag_configure(
+                "success",
+                foreground=COLORS["green"],
+            )
+            self.log._textbox.tag_configure(
+                "warning",
+                foreground=COLORS["amber"],
+            )
+            self.log._textbox.tag_configure(
+                "error",
+                foreground=COLORS["red"],
+            )
         except Exception:
             pass
+
+    def _toggle_log_panel(self):
+        self._log_expanded = (
+            not self._log_expanded
+        )
+
+        if self._log_expanded:
+            self.log_panel.configure(
+                height=142
+            )
+            self.log.grid()
+            self.log_toggle_button.configure(
+                text="Đóng"
+            )
+        else:
+            self.log.grid_remove()
+            self.log_panel.configure(
+                height=42
+            )
+            self.log_toggle_button.configure(
+                text="Mở"
+            )
 
     def _build_footer(self):
         footer = ctk.CTkFrame(
@@ -3085,7 +3185,15 @@ class LauncherApp(ctk.CTk):
             profile_id,
             "Error",
         )
-        self._log(profile_id, "ERROR", str(exc))
+        self._log(
+            profile_id,
+            "ERROR",
+            str(exc),
+        )
+        self._notify(
+            f"{profile_id}: {exc}",
+            "error",
+        )
 
     def _status(self, profile_id, state):
         self._apply_runtime_status(
@@ -3099,7 +3207,15 @@ class LauncherApp(ctk.CTk):
             profile_id,
             "Error",
         )
-        self._log(profile_id, "ERROR", str(exc))
+        self._log(
+            profile_id,
+            "ERROR",
+            str(exc),
+        )
+        self._notify(
+            f"{profile_id}: {exc}",
+            "error",
+        )
 
     def _close(self):
         clear_boss_stack_order()
