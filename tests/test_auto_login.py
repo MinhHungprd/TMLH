@@ -97,7 +97,6 @@ def test_auto_login_scales_all_base_coordinates_to_client():
         input_manager=inputs,
         wait=lambda seconds, event: False,
         on_status=states.append,
-        gameplay_ready=lambda pid: True,
     )
 
     width = 480
@@ -189,7 +188,6 @@ def test_auto_login_scales_all_base_coordinates_to_client():
         "LOGIN_ENTER_CREDENTIALS",
         "LOGIN_SUBMITTING",
         "LOGIN_WAITING_START",
-        "LOGIN_WAITING_GAMEPLAY",
     ]
 
 
@@ -207,7 +205,6 @@ def test_auto_login_uses_au_lac_server_coordinate():
         detector=detector,
         input_manager=inputs,
         wait=lambda seconds, event: False,
-        gameplay_ready=lambda pid: True,
     )
 
     with patch(
@@ -319,58 +316,6 @@ def test_auto_login_skips_intro_before_processing_target_signal():
     ]
     assert any(
         "Skip"
-        in message
-        for message in logs
-    )
-
-
-
-def test_auto_login_does_not_succeed_before_gameplay_socket():
-    detector = Detector()
-    inputs = Input()
-    checks = iter(
-        [
-            False,
-            False,
-            True,
-        ]
-    )
-    logs = []
-
-    context = SimpleNamespace(
-        window_handle=10,
-        process_id=20,
-        stop_event=Event(),
-        profile_name="P",
-    )
-
-    runner = AutoLoginRunner(
-        detector=detector,
-        input_manager=inputs,
-        wait=lambda seconds, event: False,
-        gameplay_ready=lambda pid: next(
-            checks
-        ),
-        on_log=logs.append,
-    )
-
-    with patch(
-        "auto_login.get_client_size",
-        return_value=(860, 484),
-    ), patch(
-        "auto_login.set_window_topmost",
-    ):
-        assert runner.run(
-            context,
-            LoginCredentials(
-                username="u",
-                password="p",
-                server="van_lang",
-            ),
-        ) is True
-
-    assert any(
-        "gameplay socket :1002 đã sẵn sàng"
         in message
         for message in logs
     )
