@@ -89,7 +89,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
                 "61–90: Proxy 2  •  vượt số proxy: dùng proxy cuối"
             ),
             text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=9),
+            font=ctk.CTkFont(size=11),
             wraplength=480,
             justify="left",
         ).grid(
@@ -124,7 +124,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             text="ProxiFyre",
             text_color=COLORS["text"],
             font=ctk.CTkFont(
-                size=9,
+                size=11,
                 weight="bold",
             ),
             width=72,
@@ -143,7 +143,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
             text_color=COLORS["text"],
-            font=ctk.CTkFont(size=9),
+            font=ctk.CTkFont(size=11),
             placeholder_text="Đường dẫn ProxiFyre.exe",
         )
         self.path_entry.grid(
@@ -248,7 +248,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             fg_color=COLORS["cyan"],
             hover_color=COLORS["blue"],
             border_color=COLORS["border_bright"],
-            font=ctk.CTkFont(size=9, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
             checkbox_width=16,
             checkbox_height=16,
         )
@@ -270,7 +270,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
                 "ProxiFyre vẫn lưu user/pass plaintext trong app-config.json."
             ),
             text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=8),
+            font=ctk.CTkFont(size=11),
             wraplength=490,
             justify="left",
         ).grid(
@@ -289,7 +289,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             ),
             text_color=COLORS["muted"],
             font=ctk.CTkFont(
-                size=9,
+                size=11,
                 weight="bold",
             ),
             wraplength=490,
