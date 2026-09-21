@@ -9,6 +9,7 @@ import win32process
 
 from automation_constants import (
     ALIVE_DEBUG_LOG_INTERVAL,
+    BOSS_ALIVE_SIGNAL_TIMEOUT_SECONDS,
     BOSS_DEAD_CONFIRM_SECONDS,
     BOSS_ENTER_WAIT,
     BOSS_OCR_INTERVAL,
@@ -702,6 +703,15 @@ class AutomationWorker:
                 self.context.boss_dead_streak = 0
 
                 dead_candidate_since = None
+                boss_alive_since = None
+
+                reset_cycle = getattr(
+                    self.boss_detector,
+                    "reset_cycle",
+                    None,
+                )
+                if callable(reset_cycle):
+                    reset_cycle()
 
                 # Apply the phase offset only once for this worker. After
                 # that, the existing 1-second scan cadence keeps profiles
@@ -800,6 +810,13 @@ class AutomationWorker:
                     # Boss-name OCR detector
                     # ==================================
 
+                    asset_alive = bool(
+                        debug.get(
+                            "asset_alive",
+                            False,
+                        )
+                    )
+
                     if "name_alive" in debug:
                         name_alive = bool(
                             debug.get(
@@ -815,12 +832,13 @@ class AutomationWorker:
                             .is_alive(text)
                         )
 
-                    # Production boss decisions now come from fuzzy matching
-                    # the OCR'd name to context.selected_boss.
+                    # Asset match is the primary signal. OCR remains only as
+                    # the safety fallback after repeated asset misses.
                     ocr_alive = name_alive
-                    visual_alive = False
-
-                    alive = name_alive
+                    alive = (
+                        asset_alive
+                        or ocr_alive
+                    )
 
                     now = self.now()
 
@@ -830,11 +848,36 @@ class AutomationWorker:
 
                     if alive:
 
-                        # Một lần detect lại được HP
+                        # Một lần detect lại được boss
                         # => hủy toàn bộ dead candidate.
                         dead_candidate_since = None
 
                         self.context.boss_dead_streak = 0
+
+                        if boss_alive_since is None:
+                            boss_alive_since = now
+
+                        alive_for = (
+                            now
+                            - boss_alive_since
+                        )
+
+                        if (
+                            alive_for
+                            >= BOSS_ALIVE_SIGNAL_TIMEOUT_SECONDS
+                        ):
+                            self.on_log(
+                                (
+                                    "BOSS SIGNAL ERROR "
+                                    f"alive_for={alive_for:.1f}s/"
+                                    f"{BOSS_ALIVE_SIGNAL_TIMEOUT_SECONDS:.0f}s "
+                                    "-> force outboss"
+                                )
+                            )
+                            self._state(
+                                "BOSS_SIGNAL_ERROR"
+                            )
+                            break
 
                         self._state(
                             "BOSS_ALIVE"
@@ -919,6 +962,13 @@ class AutomationWorker:
                     if should_log_debug:
                         self.on_log(
                             (
+                                f"asset_alive={asset_alive} "
+                                f"asset_score="
+                                f"{debug.get('asset_score')} "
+                                f"asset_miss_streak="
+                                f"{debug.get('asset_miss_streak')} "
+                                f"fallback_ocr="
+                                f"{debug.get('fallback_ocr')} "
                                 f"text={text!r} "
                                 f"ocr_raw="
                                 f"{debug.get('ocr_raw')!r} "
