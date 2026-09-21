@@ -19,8 +19,12 @@ BOSS_ALIVE_MARKER = (443, 27, 12, 18)
 BOSS_ALIVE_ASSET = "asset__x443_y27_w12_h18.png"
 BOSS_ALIVE_MATCH_THRESHOLD = 0.82
 
-# Only invoke the heavier OCR safety fallback after the asset has missed on
-# three consecutive 1-second scans.
+# OCR implementation is retained, but disabled at runtime for the current
+# asset-only validation mode.
+BOSS_OCR_ENABLED = False
+
+# If OCR is re-enabled later, only invoke it after this many consecutive
+# 1-second asset misses.
 BOSS_ASSET_MISSES_BEFORE_OCR = 3
 
 # A boss that is continuously reported alive for too long is treated as a
