@@ -13,6 +13,7 @@ from automation_constants import (
     BOSS_ALIVE_MARKER,
     BOSS_ALIVE_MATCH_PADDING,
     BOSS_ALIVE_MATCH_THRESHOLD,
+    BOSS_OCR_FALLBACK_ENABLED,
     BOSS_HP,
     BOSS_SCAN_ROI,
 )
@@ -87,7 +88,7 @@ class BossDetector:
     - capture one combined boss ROI
     - template-match the lightweight alive marker
     - keep the existing visual HP detector
-    - use OCR as a safety fallback after 3 consecutive marker misses
+    - optionally use OCR as a safety fallback after 3 consecutive marker misses
 
     The worker's 1-second scan cadence and 3-second death confirmation are
     unchanged.
@@ -101,6 +102,7 @@ class BossDetector:
         *,
         assets_dir=None,
         marker_template=None,
+        ocr_fallback_enabled=None,
         debug_interval=10.0,
         now=None,
         full_debug=False,
@@ -140,6 +142,11 @@ class BossDetector:
         )
         self._marker_template_error = None
         self._asset_miss_streak = 0
+        self.ocr_fallback_enabled = (
+            BOSS_OCR_FALLBACK_ENABLED
+            if ocr_fallback_enabled is None
+            else bool(ocr_fallback_enabled)
+        )
 
         self.debug_interval = float(
             debug_interval
@@ -758,6 +765,28 @@ class BossDetector:
                 asset_available=True,
                 asset_alive=False,
                 asset_score=asset_score,
+            )
+            return ""
+
+        if not self.ocr_fallback_enabled:
+            # Marker validation mode: keep all OCR code available but do not
+            # invoke Tesseract. This makes marker misses visible in behavior
+            # instead of being rescued by OCR.
+            self._set_debug(
+                raw_width=raw_width,
+                raw_height=raw_height,
+                roi=roi,
+                chosen_name="ocr_disabled",
+                chosen_text="",
+                alive=False,
+                attempts=[],
+                visual_glyphs=visual_glyphs,
+                visual_alive=False,
+                debug_dir=None,
+                asset_available=asset_available,
+                asset_alive=False,
+                asset_score=asset_score,
+                asset_error=asset_error,
             )
             return ""
 
