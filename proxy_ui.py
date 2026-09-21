@@ -30,8 +30,8 @@ class ProxySettingsDialog(ctk.CTkToplevel):
         self.on_apply = on_apply
 
         self.title("SOCKS5 Proxy")
-        self.geometry("520x430")
-        self.minsize(500, 410)
+        self.geometry("520x470")
+        self.minsize(500, 450)
         self.configure(
             fg_color=COLORS["bg"],
         )
@@ -40,6 +40,9 @@ class ProxySettingsDialog(ctk.CTkToplevel):
 
         self.path_var = tk.StringVar(
             value=settings.proxifyre_path
+        )
+        self.test_mode_var = tk.BooleanVar(
+            value=bool(settings.test_mode)
         )
 
         self.grid_columnconfigure(
@@ -222,20 +225,44 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             ),
         )
 
+        self.test_mode_check = ctk.CTkCheckBox(
+            proxy_card,
+            text=(
+                "Test proxy với ít tab — Profile 1 Direct, "
+                "Profile 2 → Proxy 1, Profile 3 → Proxy 2..."
+            ),
+            variable=self.test_mode_var,
+            text_color=COLORS["text"],
+            fg_color=COLORS["cyan"],
+            hover_color=COLORS["blue"],
+            border_color=COLORS["border_bright"],
+            font=ctk.CTkFont(size=9, weight="bold"),
+            checkbox_width=16,
+            checkbox_height=16,
+        )
+        self.test_mode_check.grid(
+            row=2,
+            column=0,
+            sticky="w",
+            padx=10,
+            pady=(0, 6),
+        )
+
         ctk.CTkLabel(
             proxy_card,
             text=(
-                "Cấu hình TMLH được mã hóa bằng Windows DPAPI. "
-                "ProxiFyre bắt buộc lưu user/pass dạng plaintext "
-                "trong app-config.json của chính ProxiFyre. "
-                "Muốn tắt proxy: xóa hết các dòng rồi bấm Áp dụng."
+                "Khi bật Test: chỉ cần 2 profile để thử route thật của game. "
+                "Sau khi test xong hãy bỏ chọn và bấm Áp dụng để quay về "
+                "1–30 Direct, 31–60 Proxy 1. "
+                "Cấu hình TMLH được mã hóa bằng Windows DPAPI; "
+                "ProxiFyre vẫn lưu user/pass plaintext trong app-config.json."
             ),
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=8),
             wraplength=460,
             justify="left",
         ).grid(
-            row=2,
+            row=3,
             column=0,
             sticky="w",
             padx=10,
@@ -318,6 +345,9 @@ class ProxySettingsDialog(ctk.CTkToplevel):
         return ProxySettings(
             proxifyre_path=path,
             proxies=proxies,
+            test_mode=bool(
+                self.test_mode_var.get()
+            ),
         )
 
     def _save(self):
@@ -328,6 +358,7 @@ class ProxySettingsDialog(ctk.CTkToplevel):
                 "Proxy",
                 (
                     f"Đã lưu {len(settings.proxies)} proxy.\n"
+                    f"Chế độ: {'TEST ít tab' if settings.test_mode else 'BÌNH THƯỜNG'}.\n"
                     "Thiết lập sẽ được áp dụng khi bấm Áp dụng."
                 ),
                 parent=self,
@@ -352,9 +383,16 @@ class ProxySettingsDialog(ctk.CTkToplevel):
             messagebox.showinfo(
                 "Proxy",
                 (
-                    "Đã tạo cấu hình route và gửi yêu cầu "
-                    "restart ProxiFyre. Nếu Windows hiện UAC, "
-                    "hãy cho phép để áp dụng."
+                    (
+                        "Đã áp dụng TEST MODE: Profile 1 Direct, "
+                        "Profile 2 → Proxy 1, Profile 3 → Proxy 2...\n\n"
+                        "Nên restart các tab game đang mở để tạo connection mới. "
+                        "Test xong bỏ chọn Test và bấm Áp dụng để khôi phục route chuẩn."
+                        if settings.test_mode
+                        else
+                        "Đã tạo cấu hình route chuẩn và gửi yêu cầu restart ProxiFyre. "
+                        "Nếu Windows hiện UAC, hãy cho phép để áp dụng."
+                    )
                 ),
                 parent=self,
             )
