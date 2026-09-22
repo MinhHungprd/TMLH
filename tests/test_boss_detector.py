@@ -40,6 +40,17 @@ def _marker_template():
     return image
 
 
+def test_marker_template_is_shared_across_workers():
+    first = BossDetector()
+    second = BossDetector()
+
+    first_template = first._load_marker_template()
+    second_template = second._load_marker_template()
+
+    assert first_template is not None
+    assert first_template is second_template
+
+
 def test_asset_match_is_immediate_alive_and_skips_ocr():
     template = _marker_template()
     calls = []
