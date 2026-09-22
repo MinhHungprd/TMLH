@@ -13,6 +13,7 @@ Boss ID:
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import json
 from pathlib import Path
 import sys
@@ -49,10 +50,37 @@ BOSSES = {
     "dai_tho_san":  0x6077,
 }
 
-# Only one attach/load/detach operation at a time. Multiple simultaneous
-# Frida sessions create short CPU/context-switch spikes even when average
-# utilization remains low.
-_FRIDA_LOCK = threading.Lock()
+# Keep each profile's Frida command flow identical (attach -> load -> wait
+# -> send -> detach), but do not force unrelated game PIDs through one global
+# queue. A small global concurrency cap smooths CPU/context-switch bursts while
+# allowing multi-profile runs to make progress in parallel.
+FRIDA_MAX_CONCURRENT = 4
+_FRIDA_SEMAPHORE = threading.BoundedSemaphore(
+    FRIDA_MAX_CONCURRENT
+)
+_FRIDA_PID_LOCKS = {}
+_FRIDA_PID_LOCKS_GUARD = threading.Lock()
+
+
+def _frida_pid_lock(pid: int):
+    with _FRIDA_PID_LOCKS_GUARD:
+        lock = _FRIDA_PID_LOCKS.get(pid)
+
+        if lock is None:
+            lock = threading.Lock()
+            _FRIDA_PID_LOCKS[pid] = lock
+
+        return lock
+
+
+@lru_cache(maxsize=1)
+def _frida_script_template() -> str:
+    """Read the immutable Frida JS template once per bot process."""
+    return (
+        Path(__file__)
+        .with_suffix(".js")
+        .read_text(encoding="utf-8")
+    )
 
 
 # ---------- Tạo gói ----------
@@ -225,28 +253,32 @@ def has_gameplay_socket(pid: int) -> bool:
 def send_packet(pid: int, packet: str, wait: float, stop_event=None) -> int:
     wait_started = time.perf_counter()
 
-    with _FRIDA_LOCK:
-        try:
-            from perf_metrics import record_perf_ms
+    # Commands for one exact PID remain strictly serialized, preserving the
+    # old per-profile ordering. Different PIDs may run concurrently up to the
+    # bounded process-wide limit.
+    with _frida_pid_lock(pid):
+        with _FRIDA_SEMAPHORE:
+            try:
+                from perf_metrics import record_perf_ms
 
-            record_perf_ms(
-                "wait_frida_ms",
-                (
-                    time.perf_counter()
-                    - wait_started
+                record_perf_ms(
+                    "wait_frida_ms",
+                    (
+                        time.perf_counter()
+                        - wait_started
+                    )
+                    * 1000.0,
                 )
-                * 1000.0,
-            )
-        except ModuleNotFoundError:
-            pass
+            except ModuleNotFoundError:
+                pass
 
-        with perf_timer("frida_ms"):
-            return _send_packet_impl(
-                pid,
-                packet,
-                wait,
-                stop_event,
-            )
+            with perf_timer("frida_ms"):
+                return _send_packet_impl(
+                    pid,
+                    packet,
+                    wait,
+                    stop_event,
+                )
 
 
 def _send_packet_impl(pid: int, packet: str, wait: float, stop_event=None) -> int:
@@ -260,9 +292,7 @@ def _send_packet_impl(pid: int, packet: str, wait: float, stop_event=None) -> in
     )
 
     source = (
-        Path(__file__)
-        .with_suffix(".js")
-        .read_text(encoding="utf-8")
+        _frida_script_template()
         .replace(
             "__TARGETS__",
             json.dumps(remotes),
