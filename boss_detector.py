@@ -85,6 +85,7 @@ class BossDetector:
             marker_template is not None
         )
         self._marker_template_error = None
+        self._scaled_marker_templates = {}
         self._asset_miss_streak = 0
 
         # Positive-only OCR cache.
@@ -805,28 +806,47 @@ class BossDetector:
             marker_height,
         )
 
-        if (
-            template.shape[1] != marker_width
-            or template.shape[0] != marker_height
-        ):
-            interpolation = (
-                cv2.INTER_AREA
-                if (
-                    marker_width
-                    < template.shape[1]
-                    or marker_height
-                    < template.shape[0]
+        scaled_key = (
+            marker_width,
+            marker_height,
+        )
+        scaled_template = (
+            self._scaled_marker_templates.get(
+                scaled_key
+            )
+        )
+
+        if scaled_template is None:
+            if (
+                template.shape[1] == marker_width
+                and template.shape[0] == marker_height
+            ):
+                scaled_template = template
+            else:
+                interpolation = (
+                    cv2.INTER_AREA
+                    if (
+                        marker_width
+                        < template.shape[1]
+                        or marker_height
+                        < template.shape[0]
+                    )
+                    else cv2.INTER_CUBIC
                 )
-                else cv2.INTER_CUBIC
-            )
-            template = cv2.resize(
-                template,
-                (
-                    marker_width,
-                    marker_height,
-                ),
-                interpolation=interpolation,
-            )
+                scaled_template = cv2.resize(
+                    template,
+                    (
+                        marker_width,
+                        marker_height,
+                    ),
+                    interpolation=interpolation,
+                )
+
+            self._scaled_marker_templates[
+                scaled_key
+            ] = scaled_template
+
+        template = scaled_template
 
         if (
             roi.shape[0] < template.shape[0]
@@ -862,6 +882,17 @@ class BossDetector:
         asset_error,
         fallback_ocr=False,
     ):
+        (
+            _marker_x,
+            _marker_y,
+            native_marker_width,
+            native_marker_height,
+        ) = scale_roi(
+            BOSS_ALIVE_MARKER,
+            raw_width,
+            raw_height,
+        )
+
         self.last_debug = {
             "raw_size": (
                 raw_width,
@@ -876,19 +907,11 @@ class BossDetector:
             "native_marker_shape": (
                 max(
                     1,
-                    round(
-                        BOSS_ALIVE_MARKER[2]
-                        * raw_width
-                        / 860
-                    ),
+                    native_marker_width,
                 ),
                 max(
                     1,
-                    round(
-                        BOSS_ALIVE_MARKER[3]
-                        * raw_height
-                        / 484
-                    ),
+                    native_marker_height,
                 ),
             ),
             "chosen": "asset",
