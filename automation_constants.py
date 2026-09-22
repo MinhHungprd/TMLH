@@ -14,15 +14,31 @@ SIGNAL_2 = (742, 437, 45, 24)
 SIGNAL_3 = (392, 389, 75, 35)
 BOSS_HP = (375, 8, 66, 22)
 
-# Primary boss-alive detector.
-BOSS_ALIVE_MARKER = (443, 27, 12, 18)
-BOSS_ALIVE_ASSET = "asset__x443_y27_w12_h18.png"
+# Boss-alive detector.
+#
+# Scan one canonical search box and match against every image in the selected
+# boss asset directory. Assets are authored against the same 860x484 base
+# coordinate system and are scaled to the current game client before matching.
+BOSS_ASSET_SCAN_ROI = (288, 4, 57, 51)
 BOSS_ALIVE_MATCH_THRESHOLD = 0.7
 
-# Search a small canonical area around the marker so window scaling/rounding
-# can move the rendered marker by a few pixels without turning a live boss
-# into a false miss. The marker template and threshold remain unchanged.
-BOSS_ALIVE_SEARCH_PADDING = 6
+# Runtime boss key -> asset subdirectory. Keep the existing public boss key
+# "dai_tho_san" even though the uploaded folder is named "dai_son_tac".
+BOSS_ASSET_DIRS = {
+    "trom_cho": "trom_cho",
+    "ngao_op": "ngao_op",
+    "dai_tho_san": "dai_son_tac",
+}
+BOSS_ASSET_EXTENSIONS = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+)
+
+# Legacy marker constants are kept for compatibility with older integrations
+# and tests, but the runtime detector no longer uses the fixed marker asset.
+BOSS_ALIVE_MARKER = (443, 27, 12, 18)
+BOSS_ALIVE_ASSET = "asset__x443_y27_w12_h18.png"
 
 # OCR implementation is retained, but disabled at runtime for the current
 # asset-only validation mode.
