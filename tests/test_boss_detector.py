@@ -110,6 +110,86 @@ def test_selected_boss_uses_its_own_asset_directory():
     assert dai[0][1].shape == (37, 36)
 
 
+def test_multi_template_folder_uses_highest_scoring_asset(
+    tmp_path,
+):
+    folder = tmp_path / "trom_cho"
+    folder.mkdir()
+
+    first = np.zeros(
+        (20, 18),
+        dtype=np.uint8,
+    )
+    first[2:18:3, 2:16:3] = 255
+    first[7:12, 8:10] = 120
+
+    second = np.zeros(
+        (18, 16),
+        dtype=np.uint8,
+    )
+    second[1:17:2, 1:15:2] = 255
+    second[5:14, 7:9] = 180
+
+    assert cv2.imwrite(
+        str(folder / "1.png"),
+        first,
+    )
+    assert cv2.imwrite(
+        str(folder / "2.png"),
+        second,
+    )
+
+    search = np.zeros(
+        (
+            BOSS_ASSET_SCAN_ROI[3],
+            BOSS_ASSET_SCAN_ROI[2],
+        ),
+        dtype=np.uint8,
+    )
+    search[
+        8:8 + second.shape[0],
+        19:19 + second.shape[1],
+    ] = second
+
+    detector = BossDetector(
+        assets_dir=tmp_path,
+        roi_capture=(
+            lambda hwnd, base_roi:
+            search.copy()
+        ),
+    )
+
+    detector.read_hp(
+        _context(
+            "trom_cho"
+        )
+    )
+
+    assert detector.last_debug[
+        "asset_alive"
+    ] is True
+    assert detector.last_debug[
+        "asset_name"
+    ] == "2.png"
+    assert set(
+        detector.last_debug[
+            "asset_scores"
+        ]
+    ) == {
+        "1.png",
+        "2.png",
+    }
+    assert (
+        detector.last_debug[
+            "asset_scores"
+        ]["2.png"]
+        >
+        detector.last_debug[
+            "asset_scores"
+        ]["1.png"]
+    )
+
+
 def test_asset_match_is_immediate_alive_and_skips_ocr():
     template = _marker_template()
     calls = []
