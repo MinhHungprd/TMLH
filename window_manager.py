@@ -9,7 +9,11 @@ import win32con
 import win32gui
 import win32process
 
-from automation_constants import BASE_HEIGHT, BOSS_NAME_ROI
+from automation_constants import (
+    BASE_HEIGHT,
+    BOSS_ASSET_SCAN_ROI,
+    BOSS_NAME_ROI,
+)
 PROFILE_LAUNCH_LOCK = threading.Lock()
 
 _STACK_ORDER_LOCK = threading.RLock()
@@ -179,14 +183,21 @@ def boss_scan_reveal_height(
     )
     _client_width, client_height = get_client_size(hwnd)
 
-    _x, base_y, _w, base_h = BOSS_NAME_ROI
-    roi_y = round(
-        base_y * client_height / BASE_HEIGHT
+    # Keep enough of the client visible for both the asset-only
+    # boss scan and the optional OCR name ROI. The new asset scan extends
+    # lower than the old name-only reveal area.
+    scan_bottom = max(
+        BOSS_ASSET_SCAN_ROI[1]
+        + BOSS_ASSET_SCAN_ROI[3],
+        BOSS_NAME_ROI[1]
+        + BOSS_NAME_ROI[3],
     )
-    roi_h = max(
+    roi_bottom = max(
         1,
         round(
-            base_h * client_height / BASE_HEIGHT
+            scan_bottom
+            * client_height
+            / BASE_HEIGHT
         ),
     )
 
@@ -200,8 +211,7 @@ def boss_scan_reveal_height(
     reveal = (
         client_top
         - outer_top
-        + roi_y
-        + roi_h
+        + roi_bottom
         + padding
     )
 
