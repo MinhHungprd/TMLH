@@ -366,21 +366,6 @@ class BossCaptureBroker:
                 f"{frame.shape!r}"
             )
 
-        # Convert the merged capture once, then crop every request from the
-        # shared grayscale frame. The previous implementation performed one
-        # cvtColor call per profile even though all requests came from the same
-        # MSS grab.
-        if frame.shape[2] >= 4:
-            gray_frame = cv2.cvtColor(
-                frame,
-                cv2.COLOR_BGRA2GRAY,
-            )
-        else:
-            gray_frame = cv2.cvtColor(
-                frame,
-                cv2.COLOR_BGR2GRAY,
-            )
-
         for request in requests:
             req_left, req_top, req_width, req_height = (
                 request.rect
@@ -389,7 +374,7 @@ class BossCaptureBroker:
             x = req_left - left
             y = req_top - top
 
-            region = gray_frame[
+            region = frame[
                 y:y + req_height,
                 x:x + req_width,
             ]
@@ -402,9 +387,18 @@ class BossCaptureBroker:
                     "MSS crop is outside captured batch"
                 )
 
-            # Copy only the tiny requested ROI so completed requests do not
-            # retain the much larger merged batch frame in memory.
-            request.result = region.copy()
+            if region.shape[2] >= 4:
+                gray = cv2.cvtColor(
+                    region,
+                    cv2.COLOR_BGRA2GRAY,
+                )
+            else:
+                gray = cv2.cvtColor(
+                    region,
+                    cv2.COLOR_BGR2GRAY,
+                )
+
+            request.result = gray
 
 
 SCREEN_CAPTURE_BROKER = BossCaptureBroker()
