@@ -1,4 +1,5 @@
 import re
+import threading
 import time
 import unicodedata
 from pathlib import Path
@@ -28,6 +29,10 @@ from vision import (
     normalize_roi_to_base,
     normalize_to_base,
 )
+
+
+_MARKER_TEMPLATE_CACHE = {}
+_MARKER_TEMPLATE_CACHE_LOCK = threading.Lock()
 
 
 class BossDetector:
@@ -643,21 +648,37 @@ class BossDetector:
         self._marker_template_loaded = True
         path = self.assets_dir / BOSS_ALIVE_ASSET
 
-        template = cv2.imread(
-            str(path),
-            cv2.IMREAD_GRAYSCALE,
+        expected_shape = (
+            BOSS_ALIVE_MARKER[3],
+            BOSS_ALIVE_MARKER[2],
         )
+        cache_key = (
+            str(path.resolve()),
+            expected_shape,
+        )
+
+        with _MARKER_TEMPLATE_CACHE_LOCK:
+            template = _MARKER_TEMPLATE_CACHE.get(
+                cache_key
+            )
+
+            if template is None:
+                template = cv2.imread(
+                    str(path),
+                    cv2.IMREAD_GRAYSCALE,
+                )
+
+                if template is not None:
+                    if template.shape == expected_shape:
+                        _MARKER_TEMPLATE_CACHE[
+                            cache_key
+                        ] = template
 
         if template is None:
             self._marker_template_error = (
                 f"Boss marker asset not found: {path}"
             )
             return None
-
-        expected_shape = (
-            BOSS_ALIVE_MARKER[3],
-            BOSS_ALIVE_MARKER[2],
-        )
 
         if template.shape != expected_shape:
             self._marker_template_error = (
