@@ -1,6 +1,7 @@
 from unittest.mock import patch
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
@@ -10,19 +11,21 @@ from automation_constants import (
     BOSS_NAME_ROI,
 )
 from boss_detector import BossDetector
-from vision import expand_roi
+from vision import expand_roi, scale_roi
 
 
 def _context(
     selected_boss="trom_cho",
+    width=860,
+    height=484,
 ):
     return type(
         "Context",
         (),
         {
             "window_handle": 7,
-            "window_width": 860,
-            "window_height": 484,
+            "window_width": width,
+            "window_height": height,
             "profile_id": "p1",
             "selected_boss": selected_boss,
         },
@@ -150,6 +153,67 @@ def test_asset_match_tolerates_marker_position_shift_inside_search_roi():
     assert detector.last_debug[
         "asset_score"
     ] >= 0.99
+
+
+def test_asset_match_at_320x180_uses_native_scaled_template():
+    template = _marker_template()
+    search_roi = _boss_search_roi()
+
+    canonical = np.zeros(
+        (
+            search_roi[3],
+            search_roi[2],
+        ),
+        dtype=np.uint8,
+    )
+    x = BOSS_ALIVE_SEARCH_PADDING + 1
+    y = BOSS_ALIVE_SEARCH_PADDING
+    canonical[
+        y:y + template.shape[0],
+        x:x + template.shape[1],
+    ] = template
+
+    (
+        _x,
+        _y,
+        search_width,
+        search_height,
+    ) = scale_roi(
+        search_roi,
+        320,
+        180,
+    )
+
+    native_search = cv2.resize(
+        canonical,
+        (
+            search_width,
+            search_height,
+        ),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    detector = BossDetector(
+        roi_capture=(
+            lambda hwnd, base_roi:
+            native_search.copy()
+        ),
+        marker_template=template,
+    )
+
+    detector.read_hp(
+        _context(
+            width=320,
+            height=180,
+        )
+    )
+
+    assert detector.last_debug[
+        "asset_alive"
+    ] is True
+    assert detector.last_debug[
+        "asset_score"
+    ] >= 0.82
 
 
 def test_asset_must_miss_three_scans_before_ocr_fallback():
