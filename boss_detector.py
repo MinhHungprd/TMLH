@@ -9,11 +9,11 @@ import cv2
 import numpy as np
 
 from automation_constants import (
-    BOSS_ALIVE_ASSET,
-    BOSS_ALIVE_MARKER,
     BOSS_ALIVE_MATCH_THRESHOLD,
-    BOSS_ALIVE_SEARCH_PADDING,
+    BOSS_ASSET_DIRS,
+    BOSS_ASSET_EXTENSIONS,
     BOSS_ASSET_MISSES_BEFORE_OCR,
+    BOSS_ASSET_SCAN_ROI,
     BOSS_NAME_LABELS,
     BOSS_OCR_ENABLED,
     BOSS_NAME_MATCH_COVERAGE,
@@ -26,7 +26,6 @@ from perf_metrics import perf_timer
 from vision import (
     capture_client,
     capture_client_roi,
-    expand_roi,
     get_client_size,
     normalize_roi_to_base,
     normalize_to_base,
@@ -34,18 +33,18 @@ from vision import (
 )
 
 
-_MARKER_TEMPLATE_CACHE = {}
-_MARKER_TEMPLATE_CACHE_LOCK = threading.Lock()
+_BOSS_TEMPLATE_CACHE = {}
+_BOSS_TEMPLATE_CACHE_LOCK = threading.Lock()
 
 
 class BossDetector:
     """
     Asset-first boss presence detector with OCR safety fallback.
 
-    The tiny asset__x443_y27_w12_h18.png marker is the primary signal. A
-    successful template match means the boss is alive immediately. After
-    OCR code is retained behind BOSS_OCR_ENABLED, but the current runtime
-    mode disables it so boss state is determined only by the asset signal.
+    Runtime detection scans one canonical boss box and matches every image in
+    the selected boss asset directory. Any template reaching the configured
+    threshold means the boss is alive. OCR code is retained behind
+    BOSS_OCR_ENABLED, but the current runtime mode keeps it disabled.
     """
 
     def __init__(
@@ -80,12 +79,15 @@ class BossDetector:
                 / "assets"
             )
         )
+        # marker_template is retained only as a test/backward-compatible
+        # single-template injection. Normal runtime loads every image from the
+        # selected boss folder.
         self._marker_template = marker_template
-        self._marker_template_loaded = (
-            marker_template is not None
-        )
         self._marker_template_error = None
         self._scaled_marker_templates = {}
+        self._last_asset_name = None
+        self._last_asset_scores = {}
+        self._last_asset_shapes = {}
         self._asset_miss_streak = 0
 
         # Positive-only OCR cache.
@@ -645,62 +647,121 @@ class BossDetector:
         self._last_name_candidates = None
         self._last_name_raw = None
 
-    def _load_marker_template(self):
-        if self._marker_template_loaded:
-            return self._marker_template
-
-        self._marker_template_loaded = True
-        path = self.assets_dir / BOSS_ALIVE_ASSET
-
-        expected_shape = (
-            BOSS_ALIVE_MARKER[3],
-            BOSS_ALIVE_MARKER[2],
-        )
-        cache_key = (
-            str(path.resolve()),
-            expected_shape,
-        )
-
-        with _MARKER_TEMPLATE_CACHE_LOCK:
-            template = _MARKER_TEMPLATE_CACHE.get(
-                cache_key
+    def _load_boss_templates(
+        self,
+        selected_boss: str,
+    ):
+        if self._marker_template is not None:
+            return (
+                ("<injected>", self._marker_template),
             )
 
-            if template is None:
+        folder_name = BOSS_ASSET_DIRS.get(
+            selected_boss
+        )
+        if not folder_name:
+            raise RuntimeError(
+                f"No boss asset directory mapping for {selected_boss!r}"
+            )
+
+        folder = self.assets_dir / folder_name
+        cache_key = (
+            str(folder.resolve()),
+            selected_boss,
+        )
+
+        with _BOSS_TEMPLATE_CACHE_LOCK:
+            cached = _BOSS_TEMPLATE_CACHE.get(
+                cache_key
+            )
+            if cached is not None:
+                return cached
+
+            if not folder.is_dir():
+                raise RuntimeError(
+                    f"Boss asset directory not found: {folder}"
+                )
+
+            paths = sorted(
+                path
+                for path in folder.iterdir()
+                if (
+                    path.is_file()
+                    and path.suffix.lower()
+                    in BOSS_ASSET_EXTENSIONS
+                )
+            )
+
+            templates = []
+            invalid = []
+
+            for path in paths:
                 template = cv2.imread(
                     str(path),
                     cv2.IMREAD_GRAYSCALE,
                 )
+                if template is None:
+                    invalid.append(
+                        f"{path.name}: unreadable"
+                    )
+                    continue
 
-                if template is not None:
-                    if template.shape == expected_shape:
-                        _MARKER_TEMPLATE_CACHE[
-                            cache_key
-                        ] = template
+                height, width = (
+                    template.shape[:2]
+                )
+                if (
+                    width > BOSS_ASSET_SCAN_ROI[2]
+                    or height > BOSS_ASSET_SCAN_ROI[3]
+                ):
+                    invalid.append(
+                        (
+                            f"{path.name}: "
+                            f"{width}x{height} exceeds "
+                            f"{BOSS_ASSET_SCAN_ROI[2]}x"
+                            f"{BOSS_ASSET_SCAN_ROI[3]}"
+                        )
+                    )
+                    continue
 
-        if template is None:
-            self._marker_template_error = (
-                f"Boss marker asset not found: {path}"
-            )
+                templates.append(
+                    (
+                        path.name,
+                        template,
+                    )
+                )
+
+            if not templates:
+                detail = (
+                    "; ".join(invalid)
+                    if invalid
+                    else "no image files"
+                )
+                raise RuntimeError(
+                    (
+                        f"No usable boss assets in {folder}: "
+                        f"{detail}"
+                    )
+                )
+
+            cached = tuple(templates)
+            _BOSS_TEMPLATE_CACHE[
+                cache_key
+            ] = cached
+            return cached
+
+    # Backward-compatible helper kept for older tests/integrations.
+    def _load_marker_template(self):
+        try:
+            return self._load_boss_templates(
+                "trom_cho"
+            )[0][1]
+        except RuntimeError as exc:
+            self._marker_template_error = str(exc)
             return None
-
-        if template.shape != expected_shape:
-            self._marker_template_error = (
-                "Boss marker asset has unexpected "
-                f"shape {template.shape!r}; "
-                f"expected {expected_shape!r}"
-            )
-            return None
-
-        self._marker_template = template
-        return template
 
     @staticmethod
     def _asset_search_roi():
-        return expand_roi(
-            BOSS_ALIVE_MARKER,
-            padding=BOSS_ALIVE_SEARCH_PADDING,
-        )
+        return BOSS_ASSET_SCAN_ROI
 
     def _capture_asset_roi(
         self,
@@ -766,109 +827,177 @@ class BossDetector:
             raw_height,
         )
 
+    def _scaled_boss_template(
+        self,
+        selected_boss,
+        asset_name,
+        template,
+        raw_width,
+        raw_height,
+    ):
+        (
+            _x,
+            _y,
+            target_width,
+            target_height,
+        ) = scale_roi(
+            (
+                0,
+                0,
+                template.shape[1],
+                template.shape[0],
+            ),
+            raw_width,
+            raw_height,
+        )
+
+        target_width = max(
+            1,
+            target_width,
+        )
+        target_height = max(
+            1,
+            target_height,
+        )
+
+        key = (
+            selected_boss,
+            asset_name,
+            target_width,
+            target_height,
+        )
+        scaled = self._scaled_marker_templates.get(
+            key
+        )
+
+        if scaled is not None:
+            return scaled
+
+        if (
+            template.shape[1] == target_width
+            and template.shape[0] == target_height
+        ):
+            scaled = template
+        else:
+            interpolation = (
+                cv2.INTER_AREA
+                if (
+                    target_width
+                    < template.shape[1]
+                    or target_height
+                    < template.shape[0]
+                )
+                else cv2.INTER_CUBIC
+            )
+            scaled = cv2.resize(
+                template,
+                (
+                    target_width,
+                    target_height,
+                ),
+                interpolation=interpolation,
+            )
+
+        self._scaled_marker_templates[
+            key
+        ] = scaled
+        return scaled
+
     def _match_asset(
         self,
         roi,
         raw_width,
         raw_height,
+        selected_boss,
     ):
-        template = self._load_marker_template()
+        self._last_asset_name = None
+        self._last_asset_scores = {}
+        self._last_asset_shapes = {}
 
-        if (
-            template is None
-            or roi is None
-            or roi.size == 0
-        ):
+        if roi is None or roi.size == 0:
             return (
                 False,
                 0.0,
-                self._marker_template_error
-                or "marker ROI unavailable",
+                "boss asset search ROI unavailable",
             )
 
-        (
-            _marker_x,
-            _marker_y,
-            marker_width,
-            marker_height,
-        ) = scale_roi(
-            BOSS_ALIVE_MARKER,
-            raw_width,
-            raw_height,
-        )
-
-        marker_width = max(
-            1,
-            marker_width,
-        )
-        marker_height = max(
-            1,
-            marker_height,
-        )
-
-        scaled_key = (
-            marker_width,
-            marker_height,
-        )
-        scaled_template = (
-            self._scaled_marker_templates.get(
-                scaled_key
+        try:
+            templates = self._load_boss_templates(
+                selected_boss
             )
-        )
-
-        if scaled_template is None:
-            if (
-                template.shape[1] == marker_width
-                and template.shape[0] == marker_height
-            ):
-                scaled_template = template
-            else:
-                interpolation = (
-                    cv2.INTER_AREA
-                    if (
-                        marker_width
-                        < template.shape[1]
-                        or marker_height
-                        < template.shape[0]
-                    )
-                    else cv2.INTER_CUBIC
-                )
-                scaled_template = cv2.resize(
-                    template,
-                    (
-                        marker_width,
-                        marker_height,
-                    ),
-                    interpolation=interpolation,
-                )
-
-            self._scaled_marker_templates[
-                scaled_key
-            ] = scaled_template
-
-        template = scaled_template
-
-        if (
-            roi.shape[0] < template.shape[0]
-            or roi.shape[1] < template.shape[1]
-        ):
+        except RuntimeError as exc:
+            self._marker_template_error = str(exc)
             return (
                 False,
                 0.0,
-                "marker search ROI is smaller than scaled template",
+                self._marker_template_error,
             )
 
-        score = float(
-            cv2.matchTemplate(
-                roi,
+        best_score = -1.0
+        best_name = None
+        usable = 0
+
+        for asset_name, template in templates:
+            scaled = self._scaled_boss_template(
+                selected_boss,
+                asset_name,
                 template,
-                cv2.TM_CCOEFF_NORMED,
-            ).max()
-        )
+                raw_width,
+                raw_height,
+            )
+
+            self._last_asset_shapes[
+                asset_name
+            ] = (
+                scaled.shape[1],
+                scaled.shape[0],
+            )
+
+            if (
+                roi.shape[0] < scaled.shape[0]
+                or roi.shape[1] < scaled.shape[1]
+            ):
+                self._last_asset_scores[
+                    asset_name
+                ] = None
+                continue
+
+            usable += 1
+
+            score = float(
+                cv2.matchTemplate(
+                    roi,
+                    scaled,
+                    cv2.TM_CCOEFF_NORMED,
+                ).max()
+            )
+            self._last_asset_scores[
+                asset_name
+            ] = round(
+                score,
+                4,
+            )
+
+            if score > best_score:
+                best_score = score
+                best_name = asset_name
+
+        self._last_asset_name = best_name
+
+        if usable == 0:
+            return (
+                False,
+                0.0,
+                (
+                    "boss asset search ROI is smaller "
+                    "than every scaled template"
+                ),
+            )
 
         return (
-            score >= BOSS_ALIVE_MATCH_THRESHOLD,
-            score,
+            best_score
+            >= BOSS_ALIVE_MATCH_THRESHOLD,
+            best_score,
             None,
         )
 
@@ -883,12 +1012,12 @@ class BossDetector:
         fallback_ocr=False,
     ):
         (
-            _marker_x,
-            _marker_y,
-            native_marker_width,
-            native_marker_height,
+            _scan_x,
+            _scan_y,
+            native_scan_width,
+            native_scan_height,
         ) = scale_roi(
-            BOSS_ALIVE_MARKER,
+            BOSS_ASSET_SCAN_ROI,
             raw_width,
             raw_height,
         )
@@ -898,21 +1027,28 @@ class BossDetector:
                 raw_width,
                 raw_height,
             ),
-            "roi": BOSS_ALIVE_MARKER,
+            "roi": BOSS_ASSET_SCAN_ROI,
             "search_roi": self._asset_search_roi(),
             "roi_shape": (
-                BOSS_ALIVE_MARKER[2],
-                BOSS_ALIVE_MARKER[3],
+                BOSS_ASSET_SCAN_ROI[2],
+                BOSS_ASSET_SCAN_ROI[3],
             ),
-            "native_marker_shape": (
+            "native_roi_shape": (
                 max(
                     1,
-                    native_marker_width,
+                    native_scan_width,
                 ),
                 max(
                     1,
-                    native_marker_height,
+                    native_scan_height,
                 ),
+            ),
+            "asset_name": self._last_asset_name,
+            "asset_scores": dict(
+                self._last_asset_scores
+            ),
+            "asset_shapes": dict(
+                self._last_asset_shapes
             ),
             "chosen": "asset",
             "text": "",
@@ -1037,6 +1173,12 @@ class BossDetector:
             context
         )
 
+        selected_boss = getattr(
+            self.context if hasattr(self, "context") else context,
+            "selected_boss",
+            "",
+        )
+
         (
             asset_alive,
             asset_score,
@@ -1045,6 +1187,7 @@ class BossDetector:
             asset_roi,
             raw_width,
             raw_height,
+            selected_boss,
         )
 
         if asset_alive:
