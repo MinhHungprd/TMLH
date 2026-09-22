@@ -30,6 +30,7 @@ from vision import (
     get_client_size,
     normalize_roi_to_base,
     normalize_to_base,
+    scale_roi,
 )
 
 
@@ -738,12 +739,8 @@ class BossDetector:
                 context.window_handle,
                 search_roi,
             )
-            roi = normalize_roi_to_base(
-                raw_roi,
-                search_roi,
-            )
             return (
-                roi,
+                raw_roi,
                 raw_width,
                 raw_height,
             )
@@ -752,11 +749,12 @@ class BossDetector:
             context.window_handle
         )
         raw_height, raw_width = raw.shape[:2]
-        normalized = normalize_to_base(
-            raw
+        x, y, w, h = scale_roi(
+            search_roi,
+            raw_width,
+            raw_height,
         )
-        x, y, w, h = search_roi
-        roi = normalized[
+        roi = raw[
             y:y + h,
             x:x + w,
         ]
@@ -770,6 +768,8 @@ class BossDetector:
     def _match_asset(
         self,
         roi,
+        raw_width,
+        raw_height,
     ):
         template = self._load_marker_template()
 
@@ -785,6 +785,49 @@ class BossDetector:
                 or "marker ROI unavailable",
             )
 
+        (
+            _marker_x,
+            _marker_y,
+            marker_width,
+            marker_height,
+        ) = scale_roi(
+            BOSS_ALIVE_MARKER,
+            raw_width,
+            raw_height,
+        )
+
+        marker_width = max(
+            1,
+            marker_width,
+        )
+        marker_height = max(
+            1,
+            marker_height,
+        )
+
+        if (
+            template.shape[1] != marker_width
+            or template.shape[0] != marker_height
+        ):
+            interpolation = (
+                cv2.INTER_AREA
+                if (
+                    marker_width
+                    < template.shape[1]
+                    or marker_height
+                    < template.shape[0]
+                )
+                else cv2.INTER_CUBIC
+            )
+            template = cv2.resize(
+                template,
+                (
+                    marker_width,
+                    marker_height,
+                ),
+                interpolation=interpolation,
+            )
+
         if (
             roi.shape[0] < template.shape[0]
             or roi.shape[1] < template.shape[1]
@@ -792,7 +835,7 @@ class BossDetector:
             return (
                 False,
                 0.0,
-                "marker search ROI is smaller than template",
+                "marker search ROI is smaller than scaled template",
             )
 
         score = float(
@@ -829,6 +872,24 @@ class BossDetector:
             "roi_shape": (
                 BOSS_ALIVE_MARKER[2],
                 BOSS_ALIVE_MARKER[3],
+            ),
+            "native_marker_shape": (
+                max(
+                    1,
+                    round(
+                        BOSS_ALIVE_MARKER[2]
+                        * raw_width
+                        / 860
+                    ),
+                ),
+                max(
+                    1,
+                    round(
+                        BOSS_ALIVE_MARKER[3]
+                        * raw_height
+                        / 484
+                    ),
+                ),
             ),
             "chosen": "asset",
             "text": "",
@@ -958,7 +1019,9 @@ class BossDetector:
             asset_score,
             asset_error,
         ) = self._match_asset(
-            asset_roi
+            asset_roi,
+            raw_width,
+            raw_height,
         )
 
         if asset_alive:
