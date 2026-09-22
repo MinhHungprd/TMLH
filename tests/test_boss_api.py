@@ -264,4 +264,4 @@ def test_two_profiles_can_resolve_different_ports():
     ]
 
     assert api.discover_game_remote(hung)["port"] == 1001
-    assert api.discover_game_remote(narly)["port"] == 8001
+    assert api.discover_game_remote(narly)["port"] == 443
