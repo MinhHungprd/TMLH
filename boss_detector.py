@@ -1174,7 +1174,7 @@ class BossDetector:
         )
 
         selected_boss = getattr(
-            self.context if hasattr(self, "context") else context,
+            context,
             "selected_boss",
             "",
         )
