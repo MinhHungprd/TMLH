@@ -39,8 +39,8 @@ def test_send_packet_attaches_only_to_exact_pid():
         ),
         patch.object(
             api,
-            "discover_game_remote",
-            return_value=remote,
+            "discover_game_remotes",
+            return_value=[remote],
         ),
         patch.object(
             api.frida,
@@ -179,7 +179,7 @@ def test_discover_game_remote_port_1002():
     }
 
 
-def test_discover_game_remote_ignores_other_servers():
+def test_discover_game_remote_prefers_non_login_socket():
     process = Mock(pid=104)
 
     process.net_connections.return_value = [
@@ -193,34 +193,31 @@ def test_discover_game_remote_ignores_other_servers():
         ),
     ]
 
+    # Dynamic routing intentionally does not hard-code a server IP. When a
+    # dedicated non-login socket exists, it is preferred over :8001.
     assert api.discover_game_remote(process) == {
-        "ip": "14.225.213.205",
-        "port": 8001,
+        "ip": "171.244.128.12",
+        "port": 443,
     }
 
 
 def test_discover_game_remote_missing():
     process = Mock(pid=105)
 
-    process.net_connections.return_value = [
-        make_connection(
-            "171.244.128.12",
-            443,
-        ),
-    ]
+    process.net_connections.return_value = []
 
     try:
         api.discover_game_remote(process)
     except RuntimeError as exc:
         assert "105" in str(exc)
-        assert "14.225.213.205" in str(exc)
+        assert "ESTABLISHED" in str(exc)
     else:
         raise AssertionError(
             "Expected RuntimeError"
         )
 
 
-def test_discover_game_remote_rejects_ambiguous_ports():
+def test_discover_game_remotes_drop_login_when_gameplay_candidate_exists():
     process = Mock(pid=106)
 
     process.net_connections.return_value = [
@@ -234,17 +231,14 @@ def test_discover_game_remote_rejects_ambiguous_ports():
         ),
     ]
 
-    try:
-        api.discover_game_remote(process)
-    except RuntimeError as exc:
-        message = str(exc)
-
-        assert "1001" in message
-        assert "8001" in message
-    else:
-        raise AssertionError(
-            "Expected RuntimeError"
-        )
+    assert api.discover_game_remotes(
+        process
+    ) == [
+        {
+            "ip": "14.225.213.205",
+            "port": 1001,
+        },
+    ]
 
 
 def test_two_profiles_can_resolve_different_ports():
