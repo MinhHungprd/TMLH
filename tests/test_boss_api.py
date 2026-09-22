@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import Mock, patch
 
 import boss.enter_boss as api
@@ -62,6 +63,52 @@ def test_send_packet_attaches_only_to_exact_pid():
 
     attach.assert_called_once_with(42)
     session.detach.assert_called_once()
+
+
+def test_send_packet_allows_different_pids_to_progress_in_parallel():
+    both_entered = threading.Event()
+    release = threading.Event()
+    entered = []
+    entered_lock = threading.Lock()
+    results = []
+
+    def fake_send_impl(pid, packet, wait, stop_event):
+        with entered_lock:
+            entered.append(pid)
+            if len(entered) == 2:
+                both_entered.set()
+
+        release.wait(1.0)
+        return pid
+
+    with patch.object(
+        api,
+        "_send_packet_impl",
+        side_effect=fake_send_impl,
+    ):
+        first = threading.Thread(
+            target=lambda: results.append(
+                api.send_packet(101, "aa", 1)
+            )
+        )
+        second = threading.Thread(
+            target=lambda: results.append(
+                api.send_packet(202, "bb", 1)
+            )
+        )
+
+        first.start()
+        second.start()
+
+        assert both_entered.wait(1.0)
+        release.set()
+
+        first.join(1.0)
+        second.join(1.0)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert sorted(results) == [101, 202]
 
 
 def test_cli_requires_pid_before_any_boss_command():
