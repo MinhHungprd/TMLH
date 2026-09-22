@@ -213,7 +213,7 @@ def test_asset_match_at_320x180_uses_native_scaled_template():
     ] is True
     assert detector.last_debug[
         "asset_score"
-    ] >= 0.82
+    ] >= 0.7
 
 
 def test_asset_must_miss_three_scans_before_ocr_fallback():

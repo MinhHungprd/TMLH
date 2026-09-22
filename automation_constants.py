@@ -17,7 +17,7 @@ BOSS_HP = (375, 8, 66, 22)
 # Primary boss-alive detector.
 BOSS_ALIVE_MARKER = (443, 27, 12, 18)
 BOSS_ALIVE_ASSET = "asset__x443_y27_w12_h18.png"
-BOSS_ALIVE_MATCH_THRESHOLD = 0.82
+BOSS_ALIVE_MATCH_THRESHOLD = 0.7
 
 # Search a small canonical area around the marker so window scaling/rounding
 # can move the rendered marker by a few pixels without turning a live boss

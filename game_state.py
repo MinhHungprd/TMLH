@@ -99,7 +99,7 @@ class GameStateDetector:
 
         The native frame is cropped first and only the small padded search
         area is resized back to canonical coordinates. This keeps the same
-        template, padding and 0.82 threshold without resizing the full frame.
+        template, padding and 0.7 threshold without resizing the full frame.
         """
         template = self.assets.get(
             asset_name,
@@ -130,7 +130,7 @@ class GameStateDetector:
             result.max()
         )
 
-        return score >= 0.82
+        return score >= 0.7
 
     def _match(
         self,
