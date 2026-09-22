@@ -7,11 +7,12 @@ import pytest
 
 from automation_constants import (
     BOSS_ALIVE_MARKER,
-    BOSS_ALIVE_SEARCH_PADDING,
+    BOSS_ASSET_DIRS,
+    BOSS_ASSET_SCAN_ROI,
     BOSS_NAME_ROI,
 )
 from boss_detector import BossDetector
-from vision import expand_roi, scale_roi
+from vision import scale_roi
 
 
 def _context(
@@ -33,10 +34,7 @@ def _context(
 
 
 def _boss_search_roi():
-    return expand_roi(
-        BOSS_ALIVE_MARKER,
-        padding=BOSS_ALIVE_SEARCH_PADDING,
-    )
+    return BOSS_ASSET_SCAN_ROI
 
 
 def _marker_template():
@@ -63,6 +61,55 @@ def test_marker_template_is_shared_across_workers():
     assert first_template is second_template
 
 
+def test_uploaded_boss_assets_fit_configured_scan_box():
+    detector = BossDetector()
+
+    for boss_key, folder_name in (
+        BOSS_ASSET_DIRS.items()
+    ):
+        templates = detector._load_boss_templates(
+            boss_key
+        )
+
+        assert templates, folder_name
+
+        for asset_name, template in templates:
+            height, width = template.shape[:2]
+
+            assert width <= BOSS_ASSET_SCAN_ROI[2], (
+                boss_key,
+                asset_name,
+                width,
+            )
+            assert height <= BOSS_ASSET_SCAN_ROI[3], (
+                boss_key,
+                asset_name,
+                height,
+            )
+
+
+def test_selected_boss_uses_its_own_asset_directory():
+    detector = BossDetector()
+
+    trom = detector._load_boss_templates(
+        "trom_cho"
+    )
+    ngao = detector._load_boss_templates(
+        "ngao_op"
+    )
+    dai = detector._load_boss_templates(
+        "dai_tho_san"
+    )
+
+    assert trom[0][0] == "1.jpg"
+    assert ngao[0][0] == "1.jpg"
+    assert dai[0][0] == "1.jpg"
+
+    assert trom[0][1].shape == (40, 34)
+    assert ngao[0][1].shape == (37, 34)
+    assert dai[0][1].shape == (37, 36)
+
+
 def test_asset_match_is_immediate_alive_and_skips_ocr():
     template = _marker_template()
     calls = []
@@ -81,8 +128,8 @@ def test_asset_match_is_immediate_alive_and_skips_ocr():
                 ),
                 dtype=np.uint8,
             )
-            x = BOSS_ALIVE_SEARCH_PADDING
-            y = BOSS_ALIVE_SEARCH_PADDING
+            x = 8
+            y = 5
             search[
                 y:y + template.shape[0],
                 x:x + template.shape[1],
@@ -126,10 +173,10 @@ def test_asset_match_tolerates_marker_position_shift_inside_search_roi():
         dtype=np.uint8,
     )
 
-    # Expected marker origin inside the padded canonical search region is
-    # (padding, padding). Shift it a few pixels to model resize/rounding drift.
-    x = BOSS_ALIVE_SEARCH_PADDING + 3
-    y = BOSS_ALIVE_SEARCH_PADDING - 2
+    # Put the template away from the expected origin to prove the detector
+    # searches the whole configured box instead of one fixed pixel location.
+    x = 12
+    y = 3
     search[
         y:y + template.shape[0],
         x:x + template.shape[1],
@@ -166,8 +213,8 @@ def test_asset_match_at_320x180_uses_native_scaled_template():
         ),
         dtype=np.uint8,
     )
-    x = BOSS_ALIVE_SEARCH_PADDING + 1
-    y = BOSS_ALIVE_SEARCH_PADDING
+    x = 9
+    y = 5
     canonical[
         y:y + template.shape[0],
         x:x + template.shape[1],
