@@ -6,9 +6,11 @@ import pytest
 
 from automation_constants import (
     BOSS_ALIVE_MARKER,
+    BOSS_ALIVE_SEARCH_PADDING,
     BOSS_NAME_ROI,
 )
 from boss_detector import BossDetector
+from vision import expand_roi
 
 
 def _context(
@@ -25,6 +27,13 @@ def _context(
             "selected_boss": selected_boss,
         },
     )()
+
+
+def _boss_search_roi():
+    return expand_roi(
+        BOSS_ALIVE_MARKER,
+        padding=BOSS_ALIVE_SEARCH_PADDING,
+    )
 
 
 def _marker_template():
@@ -61,8 +70,21 @@ def test_asset_match_is_immediate_alive_and_skips_ocr():
             return "Trm cho"
 
     def capture_roi(hwnd, base_roi):
-        if base_roi == BOSS_ALIVE_MARKER:
-            return template.copy()
+        if base_roi == _boss_search_roi():
+            search = np.zeros(
+                (
+                    base_roi[3],
+                    base_roi[2],
+                ),
+                dtype=np.uint8,
+            )
+            x = BOSS_ALIVE_SEARCH_PADDING
+            y = BOSS_ALIVE_SEARCH_PADDING
+            search[
+                y:y + template.shape[0],
+                x:x + template.shape[1],
+            ] = template
+            return search
         raise AssertionError(
             "OCR ROI must not be captured when asset matches"
         )
@@ -89,6 +111,47 @@ def test_asset_match_is_immediate_alive_and_skips_ocr():
     ] is False
 
 
+def test_asset_match_tolerates_marker_position_shift_inside_search_roi():
+    template = _marker_template()
+    search_roi = _boss_search_roi()
+
+    search = np.zeros(
+        (
+            search_roi[3],
+            search_roi[2],
+        ),
+        dtype=np.uint8,
+    )
+
+    # Expected marker origin inside the padded canonical search region is
+    # (padding, padding). Shift it a few pixels to model resize/rounding drift.
+    x = BOSS_ALIVE_SEARCH_PADDING + 3
+    y = BOSS_ALIVE_SEARCH_PADDING - 2
+    search[
+        y:y + template.shape[0],
+        x:x + template.shape[1],
+    ] = template
+
+    detector = BossDetector(
+        roi_capture=(
+            lambda hwnd, base_roi:
+            search.copy()
+        ),
+        marker_template=template,
+    )
+
+    detector.read_hp(
+        _context()
+    )
+
+    assert detector.last_debug[
+        "asset_alive"
+    ] is True
+    assert detector.last_debug[
+        "asset_score"
+    ] >= 0.99
+
+
 def test_asset_must_miss_three_scans_before_ocr_fallback():
     template = _marker_template()
     ocr_calls = []
@@ -102,7 +165,7 @@ def test_asset_must_miss_three_scans_before_ocr_fallback():
     def capture_roi(hwnd, base_roi):
         seen_rois.append(base_roi)
 
-        if base_roi == BOSS_ALIVE_MARKER:
+        if base_roi == _boss_search_roi():
             return np.zeros(
                 (
                     base_roi[3],
@@ -170,9 +233,9 @@ def test_asset_must_miss_three_scans_before_ocr_fallback():
     assert len(ocr_calls) == 1
 
     assert seen_rois == [
-        BOSS_ALIVE_MARKER,
-        BOSS_ALIVE_MARKER,
-        BOSS_ALIVE_MARKER,
+        _boss_search_roi(),
+        _boss_search_roi(),
+        _boss_search_roi(),
         BOSS_NAME_ROI,
     ]
     ocr_enabled.stop()
