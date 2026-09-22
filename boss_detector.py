@@ -12,6 +12,7 @@ from automation_constants import (
     BOSS_ALIVE_ASSET,
     BOSS_ALIVE_MARKER,
     BOSS_ALIVE_MATCH_THRESHOLD,
+    BOSS_ALIVE_SEARCH_PADDING,
     BOSS_ASSET_MISSES_BEFORE_OCR,
     BOSS_NAME_LABELS,
     BOSS_OCR_ENABLED,
@@ -25,6 +26,7 @@ from perf_metrics import perf_timer
 from vision import (
     capture_client,
     capture_client_roi,
+    expand_roi,
     get_client_size,
     normalize_roi_to_base,
     normalize_to_base,
@@ -691,6 +693,13 @@ class BossDetector:
         self._marker_template = template
         return template
 
+    @staticmethod
+    def _asset_search_roi():
+        return expand_roi(
+            BOSS_ALIVE_MARKER,
+            padding=BOSS_ALIVE_SEARCH_PADDING,
+        )
+
     def _capture_asset_roi(
         self,
         context,
@@ -711,6 +720,7 @@ class BossDetector:
             )
             or 0
         )
+        search_roi = self._asset_search_roi()
 
         if self.roi_capture is not None:
             if (
@@ -726,11 +736,11 @@ class BossDetector:
 
             raw_roi = self.roi_capture(
                 context.window_handle,
-                BOSS_ALIVE_MARKER,
+                search_roi,
             )
             roi = normalize_roi_to_base(
                 raw_roi,
-                BOSS_ALIVE_MARKER,
+                search_roi,
             )
             return (
                 roi,
@@ -745,7 +755,7 @@ class BossDetector:
         normalized = normalize_to_base(
             raw
         )
-        x, y, w, h = BOSS_ALIVE_MARKER
+        x, y, w, h = search_roi
         roi = normalized[
             y:y + h,
             x:x + w,
@@ -775,14 +785,14 @@ class BossDetector:
                 or "marker ROI unavailable",
             )
 
-        if roi.shape != template.shape:
-            roi = cv2.resize(
-                roi,
-                (
-                    template.shape[1],
-                    template.shape[0],
-                ),
-                interpolation=cv2.INTER_CUBIC,
+        if (
+            roi.shape[0] < template.shape[0]
+            or roi.shape[1] < template.shape[1]
+        ):
+            return (
+                False,
+                0.0,
+                "marker search ROI is smaller than template",
             )
 
         score = float(
@@ -815,6 +825,7 @@ class BossDetector:
                 raw_height,
             ),
             "roi": BOSS_ALIVE_MARKER,
+            "search_roi": self._asset_search_roi(),
             "roi_shape": (
                 BOSS_ALIVE_MARKER[2],
                 BOSS_ALIVE_MARKER[3],
