@@ -19,6 +19,11 @@ BOSS_ALIVE_MARKER = (443, 27, 12, 18)
 BOSS_ALIVE_ASSET = "asset__x443_y27_w12_h18.png"
 BOSS_ALIVE_MATCH_THRESHOLD = 0.82
 
+# Search a small canonical area around the marker so window scaling/rounding
+# can move the rendered marker by a few pixels without turning a live boss
+# into a false miss. The marker template and threshold remain unchanged.
+BOSS_ALIVE_SEARCH_PADDING = 6
+
 # OCR implementation is retained, but disabled at runtime for the current
 # asset-only validation mode.
 BOSS_OCR_ENABLED = False
