@@ -1,6 +1,13 @@
+from itertools import count
 from threading import Event
 
-from automation_constants import GAME_STATE_POLL_INTERVAL
+from automation_constants import (
+    BOSS_ENTER_WAIT,
+    BOSS_OCR_INTERVAL,
+    BOSS_RESPAWN_WAIT,
+    GAME_START_WAIT,
+    GAME_STATE_POLL_INTERVAL,
+)
 from game_automation import AutomationWorker, interruptible_wait
 from game_state import SignalCheck, CLICK_CENTER
 from input_manager import InputManager
@@ -53,33 +60,73 @@ def test_interruptible_wait_returns_immediately_when_stopped():
 def test_worker_runs_boss_cycle_on_actual_pid_and_revalidates_game():
     ctx = context()
     states, commands, clicks = [], [], []
-    detector = FakeDetector([[SignalCheck(True, CLICK_CENTER, (12, 13))], [], [], [], []])
+    detector = FakeDetector(
+        [
+            [SignalCheck(True, CLICK_CENTER, (12, 13))],
+            [],
+            [],
+            [],
+            [],
+        ]
+    )
 
     def wait(seconds, event):
-        if seconds == 16:
+        if seconds == BOSS_RESPAWN_WAIT:
             event.set()
             return True
         return False
 
     worker = AutomationWorker(
-        ctx, on_status=states.append, lifecycle=FakeLifecycle(), detector=detector,
-        boss_detector=FakeBoss(["", "123", "", ""]),
-        input_manager=InputManager(lambda hwnd, x, y: clicks.append((hwnd, x, y))),
-        enter=lambda pid, kind: commands.append(("enter", pid, kind)),
-        exit=lambda pid: commands.append(("exit", pid)), wait=wait,
-        now=iter([0, 1, 4]).__next__,
+        ctx,
+        on_status=states.append,
+        lifecycle=FakeLifecycle(),
+        detector=detector,
+        boss_detector=FakeBoss(
+            ["", "123", "", ""]
+        ),
+        input_manager=InputManager(
+            lambda hwnd, x, y:
+            clicks.append((hwnd, x, y))
+        ),
+        enter=lambda pid, kind:
+        commands.append(
+            ("enter", pid, kind)
+        ),
+        exit=lambda pid:
+        commands.append(("exit", pid)),
+        wait=wait,
+        now=count(0, 4).__next__,
+        gameplay_ready=lambda _pid: True,
+        boss_scan_stagger=0,
     )
+
     worker.run()
-    assert ctx.process_id == 202 and ctx.window_handle == 303
-    assert clicks == [(303, 12, 13)]
-    assert commands == [("enter", 202, "trom_cho"), ("exit", 202)]
+
+    assert (
+        ctx.process_id == 202
+        and ctx.window_handle == 303
+    )
+    assert clicks == [
+        (303, 12, 13)
+    ]
+    assert commands == [
+        ("enter", 202, "trom_cho"),
+        ("exit", 202),
+    ]
     assert states.count("BOSS_DEAD") == 1
-    assert "BOSS_CHECK_1_2_FAILED" in states
+    assert "BOSS_DEAD_CONFIRMING" in states
+    assert "BOSS_ALIVE" in states
     assert ctx.state == "STOPPED"
 
 
 def test_stop_during_each_wait_prevents_new_external_actions():
-    for stop_at in (10, GAME_STATE_POLL_INTERVAL, 3, 2, 16):
+    for stop_at in (
+        GAME_START_WAIT,
+        GAME_STATE_POLL_INTERVAL,
+        BOSS_ENTER_WAIT,
+        BOSS_OCR_INTERVAL,
+        BOSS_RESPAWN_WAIT,
+    ):
         ctx = context()
         commands = []
         errors = []
@@ -91,19 +138,52 @@ def test_stop_during_each_wait_prevents_new_external_actions():
             return False
 
         worker = AutomationWorker(
-            ctx, on_error=errors.append, lifecycle=FakeLifecycle(), detector=FakeDetector([[], [], []]),
-            boss_detector=FakeBoss(["123", "", ""]),
-            input_manager=InputManager(lambda *args: commands.append("click")),
-            enter=lambda *args: commands.append("enter"),
-            exit=lambda *args: commands.append("exit"), wait=wait,
-            now=iter([0, 4]).__next__,
+            ctx,
+            on_error=errors.append,
+            lifecycle=FakeLifecycle(),
+            detector=FakeDetector(
+                [[], [], [], []]
+            ),
+            boss_detector=FakeBoss(
+                ["123", "", ""]
+            ),
+            input_manager=InputManager(
+                lambda *args:
+                commands.append("click")
+            ),
+            enter=lambda *args:
+            commands.append("enter"),
+            exit=lambda *args:
+            commands.append("exit"),
+            wait=wait,
+            now=count(0, 4).__next__,
+            gameplay_ready=lambda _pid: True,
+            boss_scan_stagger=0,
         )
+
         worker.run()
-        assert ctx.state == "STOPPED", (stop_at, errors)
-        if stop_at in (10, GAME_STATE_POLL_INTERVAL):
+
+        assert ctx.state == "STOPPED", (
+            stop_at,
+            errors,
+        )
+        assert errors == []
+
+        if stop_at in (
+            GAME_START_WAIT,
+            GAME_STATE_POLL_INTERVAL,
+        ):
             assert commands == []
-        if stop_at == 3:
+        elif stop_at in (
+            BOSS_ENTER_WAIT,
+            BOSS_OCR_INTERVAL,
+        ):
             assert commands == ["enter"]
+        else:
+            assert commands == [
+                "enter",
+                "exit",
+            ]
 
 
 def test_input_manager_serializes_click():
