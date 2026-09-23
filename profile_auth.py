@@ -23,6 +23,14 @@ AUTH_PREFIXES = (
     "ID_SERVER_INT_",
 )
 
+# Non-secret values sufficient to identify which profile currently owns the
+# shared registry auth. Used only to avoid one profile's cleanup deleting
+# another profile's freshly restored credentials.
+AUTH_IDENTITY_PREFIXES = (
+    "UsernameThienMenh_",
+    "ID_SERVER_INT_",
+)
+
 
 def _is_auth_value(name: str) -> bool:
     return name.startswith(AUTH_PREFIXES)
@@ -50,6 +58,114 @@ def _decode_value(data):
         return base64.b64decode(data["value"])
 
     return data["value"]
+
+
+def _load_profile_auth_values(
+    game_path: str | Path,
+) -> list[dict]:
+    path = _auth_path(game_path)
+
+    if not path.is_file():
+        raise RuntimeError(
+            "Profile chưa có dữ liệu đăng nhập riêng. "
+            "Hãy mở profile bằng Continue Login, đăng nhập đúng account "
+            "rồi bấm 'Đã đăng nhập'."
+        )
+
+    try:
+        raw = win32crypt.CryptUnprotectData(
+            path.read_bytes(),
+            None,
+            None,
+            None,
+            0,
+        )[1]
+    except Exception as exc:
+        raise RuntimeError(
+            f"Không giải mã được auth của profile: {path}"
+        ) from exc
+
+    payload = json.loads(
+        raw.decode("utf-8")
+    )
+    values = payload.get(
+        "values",
+        [],
+    )
+
+    if not values:
+        raise RuntimeError(
+            f"Auth profile rỗng: {path}"
+        )
+
+    return values
+
+
+def _identity_from_saved_values(
+    values: list[dict],
+):
+    return tuple(
+        sorted(
+            (
+                item["name"],
+                _decode_value(
+                    item["data"]
+                ),
+            )
+            for item in values
+            if item["name"].startswith(
+                AUTH_IDENTITY_PREFIXES
+            )
+        )
+    )
+
+
+def _read_current_auth_identity():
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            REGISTRY_PATH,
+            0,
+            winreg.KEY_READ,
+        )
+    except FileNotFoundError:
+        return ()
+
+    values = []
+
+    try:
+        index = 0
+
+        while True:
+            try:
+                name, value, _value_type = (
+                    winreg.EnumValue(
+                        key,
+                        index,
+                    )
+                )
+            except OSError:
+                break
+
+            index += 1
+
+            if name.startswith(
+                AUTH_IDENTITY_PREFIXES
+            ):
+                values.append(
+                    (
+                        name,
+                        value,
+                    )
+                )
+    finally:
+        winreg.CloseKey(
+            key
+        )
+
+    return tuple(
+        sorted(values)
+    )
 
 
 def _read_current_auth_values() -> list[dict]:
@@ -159,6 +275,36 @@ def clear_current_auth_values() -> None:
         winreg.CloseKey(key)
 
 
+def clear_profile_auth_if_current(
+    game_path: str | Path,
+) -> bool:
+    """
+    Clear shared registry auth only when it still belongs to this profile.
+
+    Returns True when auth was cleared. If another profile has already
+    restored its identity, returns False and leaves the registry untouched.
+    """
+    try:
+        expected = _identity_from_saved_values(
+            _load_profile_auth_values(
+                game_path
+            )
+        )
+    except RuntimeError:
+        return False
+
+    if not expected:
+        return False
+
+    current = _read_current_auth_identity()
+
+    if current != expected:
+        return False
+
+    clear_current_auth_values()
+    return True
+
+
 def save_profile_auth(game_path: str | Path) -> Path:
     values = _read_current_auth_values()
 
@@ -194,36 +340,9 @@ def restore_profile_auth(game_path: str | Path) -> None:
     Restore auth của đúng profile vào Registry chung
     ngay trước khi launch game.
     """
-    path = _auth_path(game_path)
-
-    if not path.is_file():
-        raise RuntimeError(
-            "Profile chưa có dữ liệu đăng nhập riêng. "
-            "Hãy mở profile bằng Continue Login, đăng nhập đúng account "
-            "rồi bấm 'Đã đăng nhập'."
-        )
-
-    try:
-        raw = win32crypt.CryptUnprotectData(
-            path.read_bytes(),
-            None,
-            None,
-            None,
-            0,
-        )[1]
-    except Exception as exc:
-        raise RuntimeError(
-            f"Không giải mã được auth của profile: {path}"
-        ) from exc
-
-    payload = json.loads(raw.decode("utf-8"))
-
-    values = payload.get("values", [])
-
-    if not values:
-        raise RuntimeError(
-            f"Auth profile rỗng: {path}"
-        )
+    values = _load_profile_auth_values(
+        game_path
+    )
 
     key = winreg.CreateKeyEx(
         winreg.HKEY_CURRENT_USER,
