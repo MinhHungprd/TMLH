@@ -398,6 +398,18 @@ class AutomationWorker:
             "WAITING_GAME"
         )
 
+        if (
+            startup_gate_signal
+            and not startup_gate_seen
+        ):
+            self.on_log(
+                (
+                    "WAITING STARTUP GATE "
+                    f"{startup_gate_signal}; "
+                    "in-game timeout not started"
+                )
+            )
+
         while not self._halted():
 
             # ==========================================
