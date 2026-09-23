@@ -203,6 +203,7 @@ class GameStateDetector:
                 return SignalCheck(
                     False,
                     None,
+                    signal_name=name,
                 )
 
             client_width = (
@@ -216,6 +217,7 @@ class GameStateDetector:
                 return SignalCheck(
                     True,
                     None,
+                    signal_name=name,
                 )
 
             return SignalCheck(
@@ -453,6 +455,7 @@ class GameStateDetector:
                     SignalCheck(
                         False,
                         None,
+                        signal_name=name,
                     )
                 )
                 continue
@@ -462,6 +465,7 @@ class GameStateDetector:
                     SignalCheck(
                         True,
                         None,
+                        signal_name=name,
                     )
                 )
                 continue
@@ -481,6 +485,7 @@ class GameStateDetector:
                     True,
                     CLICK_CENTER,
                     click,
+                    signal_name=name,
                 )
             )
 
