@@ -19,6 +19,8 @@ from automation_constants import (
     GAME_START_WAIT,
     GAME_STATE_POLL_INTERVAL,
     IN_GAME_CONFIRM_SECONDS,
+    STARTUP_INGAME_GATE_SIGNAL,
+    STARTUP_INGAME_TIMEOUT_SECONDS,
 )
 
 from boss.enter_boss import (
@@ -681,15 +683,16 @@ class AutomationWorker:
                         return
 
                 # ======================================
-                # Detect/click startup assets
-                # cho đến khi đúng PID có :1002
+                # Detect/click startup assets.
+                # Fresh launch: s2 must be seen before the in-game timeout
+                # starts, then wait for stable no-signal + exact-PID socket.
                 # ======================================
 
                 if not self._ensure_in_game(
                     require_gameplay_socket=True,
-                    timeout=90.0,
+                    timeout=STARTUP_INGAME_TIMEOUT_SECONDS,
                     startup_gate_signal=(
-                        "s2"
+                        STARTUP_INGAME_GATE_SIGNAL
                         if launched
                         else None
                     ),
