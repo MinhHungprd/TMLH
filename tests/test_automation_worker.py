@@ -62,7 +62,14 @@ def test_worker_runs_boss_cycle_on_actual_pid_and_revalidates_game():
     states, commands, clicks = [], [], []
     detector = FakeDetector(
         [
-            [SignalCheck(True, CLICK_CENTER, (12, 13))],
+            [
+                SignalCheck(
+                    True,
+                    CLICK_CENTER,
+                    (12, 13),
+                    signal_name="s2",
+                )
+            ],
             [],
             [],
             [],
@@ -137,12 +144,31 @@ def test_stop_during_each_wait_prevents_new_external_actions():
                 return True
             return False
 
+        detector_results = (
+            [[], [], [], []]
+            if stop_at
+            == GAME_STATE_POLL_INTERVAL
+            else [
+                [
+                    SignalCheck(
+                        True,
+                        CLICK_CENTER,
+                        (12, 13),
+                        signal_name="s2",
+                    )
+                ],
+                [],
+                [],
+                [],
+            ]
+        )
+
         worker = AutomationWorker(
             ctx,
             on_error=errors.append,
             lifecycle=FakeLifecycle(),
             detector=FakeDetector(
-                [[], [], [], []]
+                detector_results
             ),
             boss_detector=FakeBoss(
                 ["123", "", ""]
@@ -178,9 +204,13 @@ def test_stop_during_each_wait_prevents_new_external_actions():
             BOSS_ENTER_WAIT,
             BOSS_OCR_INTERVAL,
         ):
-            assert commands == ["enter"]
+            assert commands == [
+                "click",
+                "enter",
+            ]
         else:
             assert commands == [
+                "click",
                 "enter",
                 "exit",
             ]
