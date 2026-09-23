@@ -28,6 +28,7 @@ class SignalCheck:
     detected: bool
     action: str | None
     coordinates: tuple[int, int] | None = None
+    signal_name: str | None = None
 
 
 class GameStateDetector:
@@ -69,12 +70,14 @@ class GameStateDetector:
             return SignalCheck(
                 False,
                 None,
+                signal_name=name,
             )
 
         if name == "s1":
             return SignalCheck(
                 True,
                 None,
+                signal_name=name,
             )
 
         x, y, w, h = roi
@@ -86,6 +89,7 @@ class GameStateDetector:
                 x + w // 2,
                 y + h // 2,
             ),
+            signal_name=name,
         )
 
     def _match_region(
@@ -222,6 +226,7 @@ class GameStateDetector:
                     client_width,
                     client_height,
                 ),
+                signal_name=name,
             )
 
         raw = self.capture(
@@ -288,12 +293,14 @@ class GameStateDetector:
             return SignalCheck(
                 False,
                 None,
+                signal_name=name,
             )
 
         if name == "s1":
             return SignalCheck(
                 True,
                 None,
+                signal_name=name,
             )
 
         return SignalCheck(
@@ -304,6 +311,7 @@ class GameStateDetector:
                 actual_width,
                 actual_height,
             ),
+            signal_name=name,
         )
 
     def check_signals(self, context):
@@ -341,6 +349,7 @@ class GameStateDetector:
                         SignalCheck(
                             False,
                             None,
+                            signal_name=name,
                         )
                     )
                     continue
@@ -350,6 +359,7 @@ class GameStateDetector:
                         SignalCheck(
                             True,
                             None,
+                            signal_name=name,
                         )
                     )
                     continue
@@ -365,6 +375,7 @@ class GameStateDetector:
                         True,
                         CLICK_CENTER,
                         click,
+                        signal_name=name,
                     )
                 )
 
