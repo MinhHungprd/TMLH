@@ -68,6 +68,12 @@ BOSS_NAME_MIN_CHARS = 4
 GAME_START_WAIT = 10.0
 IN_GAME_CONFIRM_SECONDS = 3.0
 
+# Fresh launches must reach the s2 startup marker
+# (asset__x742_y437_w45_h24.png) before the in-game timeout starts.
+# This keeps the shared-account launch lock held during long Unity loading.
+STARTUP_INGAME_GATE_SIGNAL = "s2"
+STARTUP_INGAME_TIMEOUT_SECONDS = 90.0
+
 # UI/startup polling is intentionally relaxed. Automation decisions are
 # unchanged; a slightly slower poll avoids unnecessary capture churn.
 GAME_STATE_POLL_INTERVAL = 0.5
