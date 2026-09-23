@@ -23,6 +23,7 @@ from boss.enter_boss import BOSSES
 from game_automation import AutomationWorker
 from profile_auth import (
     clear_current_auth_values,
+    clear_profile_auth_if_current,
     save_profile_auth,
 )
 from profile_credentials import (
@@ -2703,32 +2704,47 @@ class LauncherApp(ctk.CTk):
                 if callable(
                     on_complete
                 ):
-                    try:
-                        self._close_login_process(
-                            context
-                        )
-                    except Exception as exc:
-                        post_log(
-                            (
-                                "Auto login cleanup warning: "
-                                f"{exc}"
-                            )
-                        )
-                    finally:
-                        # Clear only after the old game process is gone. Some
-                        # clients write Registry again while shutting down.
+                    # Shutdown may write HKCU auth again. Serialize the whole
+                    # close/cleanup sequence with normal profile launches so it
+                    # cannot race another profile's restore.
+                    with PROFILE_LAUNCH_LOCK:
                         try:
-                            clear_current_auth_values()
+                            self._close_login_process(
+                                context
+                            )
                         except Exception as exc:
                             post_log(
                                 (
-                                    "Registry cleanup warning: "
+                                    "Auto login cleanup warning: "
                                     f"{exc}"
                                 )
                             )
+                        finally:
+                            try:
+                                cleared = (
+                                    clear_profile_auth_if_current(
+                                        profile.game_path
+                                    )
+                                )
 
-                        context.window_handle = None
-                        context.process_id = None
+                                if not cleared:
+                                    post_log(
+                                        (
+                                            "Registry cleanup skipped: "
+                                            "auth belongs to another "
+                                            "profile or is already empty"
+                                        )
+                                    )
+                            except Exception as exc:
+                                post_log(
+                                    (
+                                        "Registry cleanup warning: "
+                                        f"{exc}"
+                                    )
+                                )
+
+                            context.window_handle = None
+                            context.process_id = None
 
                 self.after(
                     0,
