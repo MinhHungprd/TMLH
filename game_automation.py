@@ -371,12 +371,24 @@ class AutomationWorker:
         self,
         require_gameplay_socket=False,
         timeout=None,
+        startup_gate_signal=None,
     ):
         absent_since = None
 
+        # For a freshly launched profile, do not start the in-game timeout
+        # until the configured startup/auth signal has actually appeared.
+        # This also keeps PROFILE_LAUNCH_LOCK held so the next profile cannot
+        # restore another account into the shared HKCU registry too early.
+        startup_gate_seen = (
+            startup_gate_signal is None
+        )
+
         deadline = (
             self.now() + timeout
-            if timeout is not None
+            if (
+                timeout is not None
+                and startup_gate_seen
+            )
             else None
         )
 
@@ -475,6 +487,42 @@ class AutomationWorker:
                     if check.detected
                 ]
 
+                if (
+                    not startup_gate_seen
+                    and startup_gate_signal
+                ):
+                    startup_gate_seen = any(
+                        (
+                            check.detected
+                            and getattr(
+                                check,
+                                "signal_name",
+                                None,
+                            )
+                            == startup_gate_signal
+                        )
+                        for check in checks
+                    )
+
+                    if startup_gate_seen:
+                        # Start timeout exactly once, from the first frame
+                        # where the gate asset is confirmed.
+                        absent_since = None
+
+                        if timeout is not None:
+                            deadline = (
+                                self.now()
+                                + timeout
+                            )
+
+                        self.on_log(
+                            (
+                                "STARTUP GATE "
+                                f"{startup_gate_signal} detected; "
+                                "in-game timeout armed"
+                            )
+                        )
+
                 # ======================================
                 # Có signal -> chưa vào game
                 # ======================================
@@ -511,43 +559,51 @@ class AutomationWorker:
             # ==========================================
 
             if not detected_checks:
-                observed_at = self.now()
+                # Fresh launches are not allowed to be declared IN_GAME before
+                # the auth/startup latch signal has appeared at least once.
+                # Without this guard, a temporary blank/loading frame plus an
+                # unrelated ESTABLISHED socket can release PROFILE_LAUNCH_LOCK
+                # and let the next profile overwrite shared registry auth.
+                if not startup_gate_seen:
+                    absent_since = None
+                else:
+                    observed_at = self.now()
 
-                if absent_since is None:
-                    absent_since = observed_at
+                    if absent_since is None:
+                        absent_since = observed_at
 
-                if (
-                    observed_at
-                    - absent_since
-                    >= IN_GAME_CONFIRM_SECONDS
-                ):
-
-                    # Sau boss cycle:
-                    # không cần check socket startup.
-                    if not require_gameplay_socket:
-
-                        self._state(
-                            "IN_GAME"
-                        )
-
-                        return True
-
-                    # Startup:
-                    # ngoài signal biến mất còn yêu cầu đúng PID có ít nhất
-                    # một TCP connection ESTABLISHED. Không hard-code :1002
-                    # vì server/route khác có thể dùng remote port khác.
-                    if self.gameplay_ready(
-                        self.context.process_id
+                    if (
+                        observed_at
+                        - absent_since
+                        >= IN_GAME_CONFIRM_SECONDS
                     ):
+
+                        # Sau boss cycle:
+                        # không cần check socket startup.
+                        if not require_gameplay_socket:
+
+                            self._state(
+                                "IN_GAME"
+                            )
+
+                            return True
+
+                        # Startup:
+                        # ngoài signal biến mất còn yêu cầu đúng PID có ít nhất
+                        # một TCP connection ESTABLISHED. Không hard-code :1002
+                        # vì server/route khác có thể dùng remote port khác.
+                        if self.gameplay_ready(
+                            self.context.process_id
+                        ):
+                            self._state(
+                                "IN_GAME"
+                            )
+
+                            return True
+
                         self._state(
-                            "IN_GAME"
+                            "WAITING_GAMEPLAY_SOCKET"
                         )
-
-                        return True
-
-                    self._state(
-                        "WAITING_GAMEPLAY_SOCKET"
-                    )
 
             # ==========================================
             # Poll startup UI
@@ -581,8 +637,9 @@ class AutomationWorker:
             #
             # restore account
             # -> launch
+            # -> wait until s2 asset is observed
             # -> click startup UI
-            # -> socket :1002
+            # -> wait for stable no-signal + PID socket
             # -> release lock
             #
             # Sau đó profile tiếp theo mới được restore
@@ -631,6 +688,11 @@ class AutomationWorker:
                 if not self._ensure_in_game(
                     require_gameplay_socket=True,
                     timeout=90.0,
+                    startup_gate_signal=(
+                        "s2"
+                        if launched
+                        else None
+                    ),
                 ):
                     return
 
