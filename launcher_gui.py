@@ -14,6 +14,7 @@ import tkinter as tk
 from tkinter import filedialog
 
 import customtkinter as ctk
+import pywintypes
 
 from account_import_dialog import AccountImportDialog
 from app_settings import AppSettings, AppSettingsStorage
@@ -416,11 +417,19 @@ class LauncherApp(ctk.CTk):
         self._pending_delete_ids = ()
         self._log_expanded = False
 
-        # Worker OCR/debug logs are batched onto the Tk thread instead of
-        # scheduling one GUI callback per profile per second.
+        # Worker threads never call Tk APIs directly. Status/error events
+        # and verbose logs cross into the GUI through thread-safe queues and
+        # are consumed only by the Tk main thread.
+        self._worker_event_queue = queue.SimpleQueue()
+        self._worker_event_flush_after_id = None
+        self._batch_worker_ui = False
+        self._batch_refresh_needed = False
+        self._batch_layout_needed = False
+
         self._log_queue = queue.SimpleQueue()
         self._log_line_count = 0
         self._log_flush_after_id = None
+        self._closing = False
 
         self.title(f"{APP_NAME} - Profile Bot")
         self.geometry("640x700")
@@ -442,6 +451,10 @@ class LauncherApp(ctk.CTk):
         self._build_log_panel()
         self._build_footer()
 
+        self._worker_event_flush_after_id = self.after(
+            50,
+            self._flush_worker_events,
+        )
         self._log_flush_after_id = self.after(
             100,
             self._flush_worker_logs,
@@ -1884,12 +1897,17 @@ class LauncherApp(ctk.CTk):
             == "TT"
             or row is None
         ):
-            self._refresh()
+            if self._batch_worker_ui:
+                self._batch_refresh_needed = True
+            else:
+                self._refresh()
         else:
             row.set_status(
                 status
             )
-            self._update_header_status()
+
+            if not self._batch_worker_ui:
+                self._update_header_status()
 
     def _focus_profile(
         self,
@@ -3166,22 +3184,27 @@ class LauncherApp(ctk.CTk):
             self._update_source_status()
 
     def _worker_callbacks(self):
+        # Tkinter is not thread-safe. Worker callbacks run on automation
+        # threads, so they only enqueue plain Python data here. The Tk main
+        # thread applies all UI mutations in _flush_worker_events().
         return {
             "on_status":
             lambda pid, state:
-            self.after(
-                0,
-                self._worker_status,
-                pid,
-                state,
+            self._worker_event_queue.put(
+                (
+                    "status",
+                    pid,
+                    state,
+                )
             ),
             "on_error":
             lambda pid, exc:
-            self.after(
-                0,
-                self._worker_error,
-                pid,
-                exc,
+            self._worker_event_queue.put(
+                (
+                    "error",
+                    pid,
+                    exc,
+                )
             ),
             "on_log":
             lambda pid, message:
@@ -3383,17 +3406,31 @@ class LauncherApp(ctk.CTk):
 
             seen_hwnds.add(hwnd)
 
-            left, top, right, bottom = (
-                win32gui.GetWindowRect(hwnd)
-            )
+            try:
+                left, top, right, bottom = (
+                    win32gui.GetWindowRect(hwnd)
+                )
 
-            width = right - left
-            height = bottom - top
+                width = right - left
+                height = bottom - top
+
+                reveal = (
+                    boss_scan_reveal_height(
+                        hwnd
+                    )
+                    if include_reveal
+                    else None
+                )
+            except (
+                pywintypes.error,
+                OSError,
+                ValueError,
+            ):
+                # Unity can recreate/destroy HWNDs between IsWindow() and the
+                # following native calls. Skip that transient handle this pass.
+                continue
 
             if include_reveal:
-                reveal = boss_scan_reveal_height(
-                    hwnd
-                )
                 items.append(
                     (
                         hwnd,
@@ -3441,19 +3478,28 @@ class LauncherApp(ctk.CTk):
         import win32gui
 
         for place in placements:
-            if not win32gui.IsWindow(place.hwnd):
+            if not win32gui.IsWindow(
+                place.hwnd
+            ):
                 continue
 
-            win32gui.SetWindowPos(
-                place.hwnd,
-                win32con.HWND_TOPMOST,
-                place.x,
-                place.y,
-                0,
-                0,
-                win32con.SWP_NOSIZE
-                | win32con.SWP_NOACTIVATE,
-            )
+            try:
+                win32gui.SetWindowPos(
+                    place.hwnd,
+                    win32con.HWND_TOPMOST,
+                    place.x,
+                    place.y,
+                    0,
+                    0,
+                    win32con.SWP_NOSIZE
+                    | win32con.SWP_NOACTIVATE,
+                )
+            except (
+                pywintypes.error,
+                OSError,
+            ):
+                # Window was recreated/closed after the validity check.
+                continue
 
     def _arrange_windows(self, remember=True):
         if remember:
@@ -3601,6 +3647,65 @@ class LauncherApp(ctk.CTk):
     # LOG / STATE
     # ------------------------------------------------------------------
 
+    def _flush_worker_events(self):
+        if self._closing:
+            return
+
+        events = []
+
+        while len(events) < 500:
+            try:
+                events.append(
+                    self._worker_event_queue.get_nowait()
+                )
+            except queue.Empty:
+                break
+
+        self._batch_worker_ui = True
+        self._batch_refresh_needed = False
+        self._batch_layout_needed = False
+
+        try:
+            for kind, profile_id, payload in events:
+                if kind == "status":
+                    self._worker_status(
+                        profile_id,
+                        payload,
+                    )
+                elif kind == "error":
+                    self._worker_error(
+                        profile_id,
+                        payload,
+                    )
+        finally:
+            self._batch_worker_ui = False
+
+        try:
+            if self._batch_refresh_needed:
+                self._refresh()
+            elif events:
+                self._update_header_status()
+
+            if self._batch_layout_needed:
+                self._apply_window_layout()
+        except tk.TclError:
+            if self._closing:
+                return
+            raise
+        finally:
+            self._batch_refresh_needed = False
+            self._batch_layout_needed = False
+
+        if not self._closing:
+            try:
+                if self.winfo_exists():
+                    self._worker_event_flush_after_id = self.after(
+                        50,
+                        self._flush_worker_events,
+                    )
+            except tk.TclError:
+                self._worker_event_flush_after_id = None
+
     def _format_log_entry(self, profile, state, message=""):
         state_text = str(state).upper()
         line = f"[{datetime.now():%H:%M:%S}] [{state_text}]  {profile}"
@@ -3619,39 +3724,63 @@ class LauncherApp(ctk.CTk):
         return line, tag
 
     def _append_log_batch(self, entries):
-        if not entries:
+        if (
+            not entries
+            or self._closing
+        ):
             return
 
-        self.log.configure(state="normal")
-
-        for line, tag in entries:
-            try:
-                self.log._textbox.insert(
-                    "end",
-                    line,
-                    tag,
-                )
-            except Exception:
-                self.log.insert(
-                    "end",
-                    line,
-                )
-
-        self._log_line_count += len(entries)
-
-        # Trim in chunks so long-running multi-profile sessions never make
-        # the Tk Text widget grow without bound.
-        while self._log_line_count > 1000:
-            self.log.delete(
-                "1.0",
-                "201.0",
+        try:
+            self.log.configure(
+                state="normal"
             )
-            self._log_line_count -= 200
 
-        self.log.see("end")
-        self.log.configure(state="disabled")
+            inserted = 0
+
+            for line, tag in entries:
+                try:
+                    self.log._textbox.insert(
+                        "end",
+                        line,
+                        tag,
+                    )
+                except (
+                    AttributeError,
+                    tk.TclError,
+                ):
+                    try:
+                        self.log.insert(
+                            "end",
+                            line,
+                        )
+                    except tk.TclError:
+                        break
+
+                inserted += 1
+
+            self._log_line_count += inserted
+
+            # Trim in chunks so long-running multi-profile sessions never make
+            # the Tk Text widget grow without bound.
+            while self._log_line_count > 1000:
+                self.log.delete(
+                    "1.0",
+                    "201.0",
+                )
+                self._log_line_count -= 200
+
+            self.log.see("end")
+            self.log.configure(
+                state="disabled"
+            )
+        except tk.TclError:
+            # The widget may be destroyed while the periodic flush is pending.
+            return
 
     def _flush_worker_logs(self):
+        if self._closing:
+            return
+
         entries = []
 
         while len(entries) < 200:
@@ -3670,13 +3799,19 @@ class LauncherApp(ctk.CTk):
                 )
             )
 
-        self._append_log_batch(entries)
+        self._append_log_batch(
+            entries
+        )
 
-        if self.winfo_exists():
-            self._log_flush_after_id = self.after(
-                100,
-                self._flush_worker_logs,
-            )
+        if not self._closing:
+            try:
+                if self.winfo_exists():
+                    self._log_flush_after_id = self.after(
+                        100,
+                        self._flush_worker_logs,
+                    )
+            except tk.TclError:
+                self._log_flush_after_id = None
 
     def _log(self, profile, state, message=""):
         self._append_log_batch(
@@ -3767,7 +3902,10 @@ class LauncherApp(ctk.CTk):
             "WAITING_GAME",
             "CONFIRMING_IN_GAME",
         ):
-            self._apply_window_layout()
+            if self._batch_worker_ui:
+                self._batch_layout_needed = True
+            else:
+                self._apply_window_layout()
 
     def _worker_error(self, profile_id, exc):
         self._apply_runtime_status(
@@ -3809,7 +3947,20 @@ class LauncherApp(ctk.CTk):
         )
 
     def _close(self):
+        if self._closing:
+            return
+
+        self._closing = True
         clear_boss_stack_order()
+
+        if self._worker_event_flush_after_id is not None:
+            try:
+                self.after_cancel(
+                    self._worker_event_flush_after_id
+                )
+            except tk.TclError:
+                pass
+            self._worker_event_flush_after_id = None
 
         if self._log_flush_after_id is not None:
             try:
