@@ -896,7 +896,7 @@ class LauncherApp(ctk.CTk):
         self.sort_combo = ctk.CTkComboBox(
             top,
             variable=self.sort_mode,
-            values=("A→Z", "Z→A", "SV", "TT"),
+            values=("A→Z", "Z→A", "Server", "TT"),
             width=92,
             height=30,
             fg_color=COLORS["input"],
@@ -1605,10 +1605,12 @@ class LauncherApp(ctk.CTk):
             except tk.TclError:
                 pass
 
+            backlog = tuple(
+                self._log_backlog
+            )
+            self._log_backlog.clear()
             self._append_log_batch(
-                tuple(
-                    self._log_backlog
-                )
+                backlog
             )
         else:
             self.log.grid_remove()
@@ -1770,7 +1772,7 @@ class LauncherApp(ctk.CTk):
                 reverse=True,
             )
 
-        if mode == "SV":
+        if mode == "Server":
             return sorted(
                 profiles,
                 key=lambda item: (
