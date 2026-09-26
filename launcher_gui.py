@@ -498,6 +498,9 @@ class LauncherApp(ctk.CTk):
                 root
             )
         )
+        self._crash_log_lock = (
+            threading.Lock()
+        )
         self.controller = controller or ProfileController(root)
         self.proxy_settings_store = ProxySettingsStorage(
             root / PROXY_SETTINGS_FILENAME
@@ -2782,6 +2785,12 @@ class LauncherApp(ctk.CTk):
             )
 
         def post_log(message):
+            self._write_runtime_trace(
+                (
+                    f"AUTOLOGIN[{profile.profile_id}] "
+                    f"{message}"
+                )
+            )
             self._log_queue.put(
                 (
                     profile.profile_id,
@@ -2848,6 +2857,18 @@ class LauncherApp(ctk.CTk):
                         on_status=post_status,
                         on_log=post_log,
                     )
+
+                    self._write_runtime_trace(
+                        (
+                            f"AUTOLOGIN[{profile.profile_id}] "
+                            "CREDENTIAL SHAPE "
+                            f"username_len={len(credentials.username)} "
+                            f"password_len={len(credentials.password)} "
+                            f"password_numeric={credentials.password.isdigit()} "
+                            f"server={credentials.server}"
+                        )
+                    )
+
                     runner.run(
                         context,
                         credentials,
@@ -3393,6 +3414,31 @@ class LauncherApp(ctk.CTk):
                 )
             )
             self._update_source_status()
+
+    def _write_runtime_trace(
+        self,
+        message,
+    ):
+        stream = getattr(
+            self,
+            "_crash_log_stream",
+            None,
+        )
+
+        if stream is None:
+            return
+
+        try:
+            with self._crash_log_lock:
+                stream.write(
+                    (
+                        f"[{datetime.now():%H:%M:%S}] "
+                        f"{message}\n"
+                    )
+                )
+                stream.flush()
+        except Exception:
+            pass
 
     def _queue_ui_call(
         self,
