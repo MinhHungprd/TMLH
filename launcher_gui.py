@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +58,18 @@ from window_manager import (
 )
 
 SIZES = tuple(f"{w}x{h}" for w, h in RESOLUTIONS)
+
+SERVER_SORT_ORDER = {
+    "van_lang": 0,
+    "au_lac": 1,
+    "server_3": 2,
+}
+
+# Keep worker/debug logging cheap for large account counts. Important
+# status/error logs still go through immediately when the panel is open.
+WORKER_LOG_UI_INTERVAL_SECONDS = 2.0
+WORKER_LOG_FLUSH_MS = 300
+LOG_BACKLOG_MAX_LINES = 300
 
 # Fast auth confirmation after the automated submit. Registry writes usually
 # appear quickly; poll more often and avoid keeping the UI in a pending state
@@ -431,6 +444,10 @@ class LauncherApp(ctk.CTk):
         self._batch_layout_needed = False
 
         self._log_queue = queue.SimpleQueue()
+        self._log_backlog = deque(
+            maxlen=LOG_BACKLOG_MAX_LINES
+        )
+        self._worker_log_last_ui_at = {}
         self._log_line_count = 0
         self._log_flush_after_id = None
         self._closing = False
@@ -460,7 +477,7 @@ class LauncherApp(ctk.CTk):
             self._flush_worker_events,
         )
         self._log_flush_after_id = self.after(
-            100,
+            WORKER_LOG_FLUSH_MS,
             self._flush_worker_logs,
         )
 
@@ -879,8 +896,8 @@ class LauncherApp(ctk.CTk):
         self.sort_combo = ctk.CTkComboBox(
             top,
             variable=self.sort_mode,
-            values=("A→Z", "Z→A", "TT"),
-            width=78,
+            values=("A→Z", "Z→A", "SV", "TT"),
+            width=92,
             height=30,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
@@ -1570,6 +1587,29 @@ class LauncherApp(ctk.CTk):
             self.log_toggle_button.configure(
                 text="Đóng"
             )
+
+            # The collapsed panel does not receive Text widget writes. Render
+            # the bounded in-memory backlog once when the user opens it.
+            try:
+                self.log.configure(
+                    state="normal"
+                )
+                self.log.delete(
+                    "1.0",
+                    "end",
+                )
+                self.log.configure(
+                    state="disabled"
+                )
+                self._log_line_count = 0
+            except tk.TclError:
+                pass
+
+            self._append_log_batch(
+                tuple(
+                    self._log_backlog
+                )
+            )
         else:
             self.log.grid_remove()
             self.log_panel.configure(
@@ -1728,6 +1768,31 @@ class LauncherApp(ctk.CTk):
                     item
                 ).casefold(),
                 reverse=True,
+            )
+
+        if mode == "SV":
+            return sorted(
+                profiles,
+                key=lambda item: (
+                    SERVER_SORT_ORDER.get(
+                        getattr(
+                            item,
+                            "server",
+                            "",
+                        ),
+                        999,
+                    ),
+                    str(
+                        getattr(
+                            item,
+                            "server",
+                            "",
+                        )
+                    ).casefold(),
+                    self._account_name(
+                        item
+                    ).casefold(),
+                ),
             )
 
         if mode == "TT":
@@ -3794,6 +3859,15 @@ class LauncherApp(ctk.CTk):
         ):
             return
 
+        self._log_backlog.extend(
+            entries
+        )
+
+        # Hidden log panel must be virtually free: keep only the bounded RAM
+        # backlog and do not configure/insert/scroll the Tk Text widget.
+        if not self._log_expanded:
+            return
+
         try:
             self.log.configure(
                 state="normal"
@@ -3826,12 +3900,15 @@ class LauncherApp(ctk.CTk):
 
             # Trim in chunks so long-running multi-profile sessions never make
             # the Tk Text widget grow without bound.
-            while self._log_line_count > 1000:
+            while (
+                self._log_line_count
+                > LOG_BACKLOG_MAX_LINES
+            ):
                 self.log.delete(
                     "1.0",
-                    "201.0",
+                    "51.0",
                 )
-                self._log_line_count -= 200
+                self._log_line_count -= 50
 
             self.log.see("end")
             self.log.configure(
@@ -3845,9 +3922,13 @@ class LauncherApp(ctk.CTk):
         if self._closing:
             return
 
-        entries = []
+        # Drain aggressively so producer threads never build a large queue,
+        # but keep only the newest worker/debug message per profile for this
+        # UI cycle.
+        latest_by_profile = {}
+        drained = 0
 
-        while len(entries) < 200:
+        while drained < 2000:
             try:
                 profile_id, message = (
                     self._log_queue.get_nowait()
@@ -3855,6 +3936,37 @@ class LauncherApp(ctk.CTk):
             except queue.Empty:
                 break
 
+            latest_by_profile[
+                profile_id
+            ] = message
+            drained += 1
+
+        now = time.monotonic()
+        entries = []
+
+        for (
+            profile_id,
+            message,
+        ) in latest_by_profile.items():
+            last = (
+                self._worker_log_last_ui_at
+                .get(
+                    profile_id,
+                    float("-inf"),
+                )
+            )
+
+            # Worker on_log is diagnostic/noisy. Render at most one line per
+            # profile every few seconds. The newest line wins.
+            if (
+                now - last
+                < WORKER_LOG_UI_INTERVAL_SECONDS
+            ):
+                continue
+
+            self._worker_log_last_ui_at[
+                profile_id
+            ] = now
             entries.append(
                 self._format_log_entry(
                     profile_id,
@@ -3871,7 +3983,7 @@ class LauncherApp(ctk.CTk):
             try:
                 if self.winfo_exists():
                     self._log_flush_after_id = self.after(
-                        100,
+                        WORKER_LOG_FLUSH_MS,
                         self._flush_worker_logs,
                     )
             except tk.TclError:
@@ -3889,9 +4001,23 @@ class LauncherApp(ctk.CTk):
         )
 
     def _clear_log(self):
-        self.log.configure(state="normal")
-        self.log.delete("1.0", "end")
-        self.log.configure(state="disabled")
+        self._log_backlog.clear()
+        self._worker_log_last_ui_at.clear()
+
+        try:
+            self.log.configure(
+                state="normal"
+            )
+            self.log.delete(
+                "1.0",
+                "end",
+            )
+            self.log.configure(
+                state="disabled"
+            )
+        except tk.TclError:
+            pass
+
         self._log_line_count = 0
 
     def _worker_log(self, profile_id, message):
