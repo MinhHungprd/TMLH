@@ -25,8 +25,9 @@ from window_manager import (
 
 SERVER_MENU_POINT = (429, 354)
 SERVER_POINTS = {
-    "van_lang": (439, 200),
-    "au_lac": (438, 245),
+    "van_lang": (439, 244),
+    "au_lac": (441, 290),
+    "server_3": (444, 197),
 }
 
 LOGIN_SIGNAL_POINT = roi_center(
@@ -442,12 +443,6 @@ class AutoLoginRunner:
             context,
             0.45,
         )
-
-        if credentials.server not in SERVER_POINTS:
-            raise ValueError(
-                "Server 3 đã được nhập vào danh sách nhưng chưa có tọa độ "
-                "click để auto-login. Hãy cung cấp vị trí server 3."
-            )
 
         self._click(
             context,
