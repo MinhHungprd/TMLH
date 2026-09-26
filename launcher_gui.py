@@ -6,11 +6,13 @@ from collections import deque
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+import faulthandler
 import inspect
 import queue
 import sys
 import threading
 import time
+import traceback
 import tkinter as tk
 from tkinter import filedialog
 
@@ -82,6 +84,104 @@ def get_app_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
+
+
+def _install_crash_logging(
+    root,
+):
+    """
+    Keep a persistent traceback even for windowed PyInstaller builds where
+    stderr is not visible. This is diagnostic-only and must never crash app
+    startup if the log file cannot be opened.
+    """
+    path = Path(root) / "TMLH_Bot_crash.log"
+
+    try:
+        stream = open(
+            path,
+            "a",
+            encoding="utf-8",
+            buffering=1,
+        )
+    except OSError:
+        return None
+
+    try:
+        stream.write(
+            (
+                "\n"
+                + "=" * 72
+                + f"\nSTART {datetime.now():%Y-%m-%d %H:%M:%S}\n"
+            )
+        )
+        faulthandler.enable(
+            file=stream,
+            all_threads=True,
+        )
+    except Exception:
+        pass
+
+    old_sys_hook = sys.excepthook
+
+    def sys_hook(
+        exc_type,
+        exc_value,
+        exc_tb,
+    ):
+        try:
+            stream.write(
+                "\n[UNHANDLED MAIN THREAD]\n"
+            )
+            traceback.print_exception(
+                exc_type,
+                exc_value,
+                exc_tb,
+                file=stream,
+            )
+            stream.flush()
+        except Exception:
+            pass
+
+        old_sys_hook(
+            exc_type,
+            exc_value,
+            exc_tb,
+        )
+
+    sys.excepthook = sys_hook
+
+    old_thread_hook = getattr(
+        threading,
+        "excepthook",
+        None,
+    )
+
+    if old_thread_hook is not None:
+        def thread_hook(args):
+            try:
+                stream.write(
+                    (
+                        "\n[UNHANDLED THREAD] "
+                        f"{getattr(args.thread, 'name', '?')}\n"
+                    )
+                )
+                traceback.print_exception(
+                    args.exc_type,
+                    args.exc_value,
+                    args.exc_traceback,
+                    file=stream,
+                )
+                stream.flush()
+            except Exception:
+                pass
+
+            old_thread_hook(
+                args
+            )
+
+        threading.excepthook = thread_hook
+
+    return stream
 
 
 class ProfileController:
@@ -393,6 +493,11 @@ class LauncherApp(ctk.CTk):
 
         root = get_app_root()
         self.app_root = root
+        self._crash_log_stream = (
+            _install_crash_logging(
+                root
+            )
+        )
         self.controller = controller or ProfileController(root)
         self.proxy_settings_store = ProxySettingsStorage(
             root / PROXY_SETTINGS_FILENAME
@@ -4184,6 +4289,48 @@ class LauncherApp(ctk.CTk):
             "error",
         )
 
+    def report_callback_exception(
+        self,
+        exc_type,
+        exc_value,
+        exc_tb,
+    ):
+        stream = getattr(
+            self,
+            "_crash_log_stream",
+            None,
+        )
+
+        if stream is not None:
+            try:
+                stream.write(
+                    "\n[TK CALLBACK ERROR]\n"
+                )
+                traceback.print_exception(
+                    exc_type,
+                    exc_value,
+                    exc_tb,
+                    file=stream,
+                )
+                stream.flush()
+            except Exception:
+                pass
+
+        # Keep the management UI alive for ordinary Python/Tk callback errors.
+        try:
+            self._log_queue.put(
+                (
+                    "App",
+                    (
+                        "Tk callback error: "
+                        f"{exc_type.__name__}: "
+                        f"{exc_value}"
+                    ),
+                )
+            )
+        except Exception:
+            pass
+
     def _close(self):
         if self._closing:
             return
@@ -4242,6 +4389,17 @@ class LauncherApp(ctk.CTk):
                     OSError,
                 ):
                     pass
+
+        try:
+            stream = getattr(
+                self,
+                "_crash_log_stream",
+                None,
+            )
+            if stream is not None:
+                stream.flush()
+        except Exception:
+            pass
 
         self.destroy()
 
