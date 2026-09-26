@@ -280,16 +280,10 @@ def test_worker_event_flush_survives_one_bad_ui_callback():
     )
 
     assert "after-bad" in called
-    assert any(
-        (
-            "UI event skipped"
-            in message
-            and "bad callback"
-            in message
-        )
-        for _profile, message
-        in iter(
-            app._log_queue.get_nowait,
-            None,
-        )
+
+    profile, message = (
+        app._log_queue.get_nowait()
     )
+    assert profile == "App"
+    assert "UI event skipped" in message
+    assert "bad callback" in message
