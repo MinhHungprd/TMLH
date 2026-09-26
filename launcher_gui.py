@@ -2453,6 +2453,16 @@ class LauncherApp(ctk.CTk):
         self._login_queue_active = True
         self._suspend_keep_above = True
 
+        # Do not compete with the game for foreground while system-wide
+        # mouse/keyboard input is used to enter credentials.
+        try:
+            self.attributes(
+                "-topmost",
+                False,
+            )
+        except tk.TclError:
+            pass
+
         self._notify(
             (
                 f"Login an toàn {len(self._login_queue)} tài khoản • "
@@ -2466,6 +2476,16 @@ class LauncherApp(ctk.CTk):
         if not self._login_queue:
             self._login_queue_active = False
             self._suspend_keep_above = False
+
+            try:
+                if not self._closing:
+                    self.attributes(
+                        "-topmost",
+                        True,
+                    )
+            except tk.TclError:
+                pass
+
             self._notify(
                 "Hàng đợi Login đã hoàn tất.",
                 "success",
