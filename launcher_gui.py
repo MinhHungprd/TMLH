@@ -484,37 +484,10 @@ class LauncherApp(ctk.CTk):
         self._refresh()
         self._update_source_status()
         self.protocol("WM_DELETE_WINDOW", self._close)
-        self.bind(
-            "<Map>",
-            self._keep_minimized_while_login,
-            add="+",
-        )
         self.after(
             500,
             self._keep_tool_above_games,
         )
-
-    def _keep_minimized_while_login(
-        self,
-        _event=None,
-    ):
-        """
-        Auto-login uses global mouse/keyboard input. Keep the launcher
-        minimized for the entire login queue so the user cannot accidentally
-        steal focus during username/password entry.
-        """
-        if (
-            self._closing
-            or not self._login_queue_active
-        ):
-            return
-
-        try:
-            self.after_idle(
-                self.iconify
-            )
-        except tk.TclError:
-            pass
 
     def _keep_tool_above_games(self):
         """
@@ -2482,8 +2455,8 @@ class LauncherApp(ctk.CTk):
 
         # Do not compete with the game for foreground while system-wide
         # mouse/keyboard input is used to enter credentials. Minimize the
-        # launcher for the full queue; <Map> will minimize it again if the
-        # user restores it manually before login is finished.
+        # launcher automatically; the user can still restore it manually if
+        # they need to inspect or stop the queue.
         try:
             self.attributes(
                 "-topmost",
