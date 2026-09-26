@@ -274,6 +274,73 @@ def test_auto_login_uses_van_xuan_server_coordinate():
     )
 
 
+def test_credential_input_retries_transient_failure():
+    attempts = []
+
+    class RetryInput(Input):
+        def click_and_paste(
+            self,
+            hwnd,
+            coordinates,
+            text,
+            stop_event=None,
+            expected_pid=None,
+        ):
+            attempts.append(
+                (
+                    coordinates,
+                    text,
+                )
+            )
+
+            if len(attempts) == 1:
+                raise RuntimeError(
+                    "foreground race"
+                )
+
+            return True
+
+    context = SimpleNamespace(
+        window_handle=10,
+        process_id=20,
+        stop_event=Event(),
+    )
+
+    logs = []
+    runner = AutoLoginRunner(
+        detector=Detector(),
+        input_manager=RetryInput(),
+        wait=lambda seconds, event: False,
+        on_log=logs.append,
+    )
+
+    with patch.object(
+        runner,
+        "_prepare_window",
+    ), patch.object(
+        runner,
+        "_scaled_point",
+        return_value=(100, 50),
+    ), patch(
+        "auto_login.find_window_for_pid",
+        return_value=11,
+    ):
+        runner._click_and_paste(
+            context,
+            USERNAME_POINT,
+            "account",
+            field_name="username",
+        )
+
+    assert len(attempts) == 2
+    assert context.window_handle == 11
+    assert any(
+        "username input retry 1/3"
+        in message
+        for message in logs
+    )
+
+
 def test_auto_login_skips_intro_before_processing_target_signal():
     class IntroDetector:
         def __init__(self):
