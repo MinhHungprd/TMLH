@@ -32,8 +32,15 @@ class FakeWorker:
 
 def controller(tmp_path):
     return ProfileController(
-        tmp_path / "bot", ProfileStorage(tmp_path / "profiles.json"),
-        AppSettingsStorage(tmp_path / "settings.json"), worker_factory=FakeWorker,
+        tmp_path / "bot",
+        ProfileStorage(
+            tmp_path / "profiles.json"
+        ),
+        AppSettingsStorage(
+            tmp_path / "settings.json"
+        ),
+        worker_factory=FakeWorker,
+        auth_saver=lambda _game_path: None,
     )
 
 
@@ -353,7 +360,10 @@ def test_sorted_profiles_can_group_by_server():
 
     app = SimpleNamespace(
         controller=SimpleNamespace(
-            profiles=profiles
+            profiles=profiles,
+            snapshot_profiles=(
+                lambda: tuple(profiles)
+            ),
         ),
         search_text=Value(""),
         status_filter=Value("Tất cả"),
