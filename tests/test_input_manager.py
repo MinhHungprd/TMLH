@@ -29,25 +29,69 @@ def test_physical_click_does_not_emit_mouse_when_foreground_fails():
     mouse_event.assert_not_called()
 
 
-def test_clipboard_open_retries_transient_lock():
-    attempts = []
-
-    def open_clipboard():
-        attempts.append(1)
-        if len(attempts) < 3:
-            raise RuntimeError(
-                "clipboard busy"
-            )
-
-    with patch(
-        "input_manager.win32clipboard.OpenClipboard",
-        side_effect=open_clipboard,
-    ), patch(
+def test_physical_paste_types_without_windows_clipboard():
+    with patch.object(
+        InputManager,
+        "_bring_game_forward",
+    ), patch.object(
+        InputManager,
+        "_foreground_is_target",
+        return_value=True,
+    ), patch.object(
+        InputManager,
+        "_send_ctrl_combo",
+    ) as select_all, patch.object(
+        InputManager,
+        "_send_unicode_text",
+    ) as send_text, patch(
         "input_manager.time.sleep",
     ):
-        InputManager._open_clipboard_with_retry()
+        InputManager._physical_paste(
+            99,
+            "123123",
+        )
 
-    assert len(attempts) == 3
+    select_all.assert_called_once_with(
+        ord("A")
+    )
+    send_text.assert_called_once_with(
+        "123123"
+    )
+
+
+def test_direct_input_accepts_problem_account_credentials():
+    with patch.object(
+        InputManager,
+        "_bring_game_forward",
+    ), patch.object(
+        InputManager,
+        "_foreground_is_target",
+        return_value=True,
+    ), patch.object(
+        InputManager,
+        "_send_ctrl_combo",
+    ), patch.object(
+        InputManager,
+        "_send_unicode_text",
+    ) as send_text, patch(
+        "input_manager.time.sleep",
+    ):
+        InputManager._physical_paste(
+            99,
+            "dyplvrrg2",
+        )
+        InputManager._physical_paste(
+            99,
+            "123123",
+        )
+
+    assert [
+        call.args[0]
+        for call in send_text.call_args_list
+    ] == [
+        "dyplvrrg2",
+        "123123",
+    ]
 
 
 def test_ctrl_combo_attempts_key_release_after_press_failure():
