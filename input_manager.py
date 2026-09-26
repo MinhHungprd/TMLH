@@ -8,6 +8,12 @@ import win32gui
 import win32process
 
 
+FOREGROUND_RETRY_COUNT = 8
+FOREGROUND_RETRY_DELAY = 0.04
+CLIPBOARD_RETRY_COUNT = 10
+CLIPBOARD_RETRY_DELAY = 0.02
+
+
 class GlobalInputLock:
     _lock = threading.Lock()
 
@@ -40,30 +46,83 @@ class InputManager:
         )
 
     @staticmethod
-    def _bring_game_forward(
+    def _foreground_is_target(
         hwnd,
     ):
         try:
-            win32gui.SetWindowPos(
-                hwnd,
-                win32con.HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                win32con.SWP_NOMOVE
-                | win32con.SWP_NOSIZE
-                | win32con.SWP_NOACTIVATE,
+            return (
+                win32gui.GetForegroundWindow()
+                == hwnd
             )
         except Exception:
-            pass
+            return False
 
-        try:
-            win32gui.SetForegroundWindow(
+    @classmethod
+    def _bring_game_forward(
+        cls,
+        hwnd,
+    ):
+        """
+        Bring the exact game HWND to foreground and verify it before any
+        system-wide mouse/keyboard input is emitted.
+
+        SetForegroundWindow can be rejected transiently by Windows. The old
+        implementation ignored that failure and still sent Ctrl+A/Ctrl+V,
+        which could land in the management UI instead.
+        """
+        last_error = None
+
+        for _attempt in range(
+            FOREGROUND_RETRY_COUNT
+        ):
+            if not win32gui.IsWindow(
                 hwnd
+            ):
+                raise RuntimeError(
+                    "Target game window is closed"
+                )
+
+            try:
+                win32gui.SetWindowPos(
+                    hwnd,
+                    win32con.HWND_TOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    win32con.SWP_NOMOVE
+                    | win32con.SWP_NOSIZE
+                    | win32con.SWP_NOACTIVATE,
+                )
+                win32gui.BringWindowToTop(
+                    hwnd
+                )
+                win32gui.SetForegroundWindow(
+                    hwnd
+                )
+            except Exception as exc:
+                last_error = exc
+
+            if cls._foreground_is_target(
+                hwnd
+            ):
+                return
+
+            time.sleep(
+                FOREGROUND_RETRY_DELAY
             )
-        except Exception:
-            pass
+
+        detail = (
+            f": {last_error}"
+            if last_error is not None
+            else ""
+        )
+        raise RuntimeError(
+            (
+                "Không thể đưa cửa sổ game lên foreground"
+                + detail
+            )
+        )
 
     @classmethod
     def _physical_click(
@@ -72,6 +131,13 @@ class InputManager:
         x,
         y,
     ):
+        # Verify foreground BEFORE clicking. Coordinates are screen-global;
+        # clicking while another TOPMOST window covers the game can hit the
+        # management UI instead.
+        cls._bring_game_forward(
+            hwnd
+        )
+
         sx, sy = (
             win32gui.ClientToScreen(
                 hwnd,
@@ -79,9 +145,12 @@ class InputManager:
             )
         )
 
-        cls._bring_game_forward(
+        if not cls._foreground_is_target(
             hwnd
-        )
+        ):
+            cls._bring_game_forward(
+                hwnd
+            )
 
         win32api.SetCursorPos(
             (sx, sy)
@@ -100,10 +169,39 @@ class InputManager:
         )
 
     @staticmethod
-    def _read_clipboard_text():
+    def _open_clipboard_with_retry():
+        last_error = None
+
+        for _attempt in range(
+            CLIPBOARD_RETRY_COUNT
+        ):
+            try:
+                win32clipboard.OpenClipboard()
+                return
+            except Exception as exc:
+                last_error = exc
+                time.sleep(
+                    CLIPBOARD_RETRY_DELAY
+                )
+
+        raise RuntimeError(
+            (
+                "Không mở được Windows clipboard"
+                + (
+                    f": {last_error}"
+                    if last_error is not None
+                    else ""
+                )
+            )
+        )
+
+    @classmethod
+    def _read_clipboard_text(
+        cls,
+    ):
         previous = None
 
-        win32clipboard.OpenClipboard()
+        cls._open_clipboard_with_retry()
 
         try:
             if win32clipboard.IsClipboardFormatAvailable(
@@ -120,11 +218,12 @@ class InputManager:
 
         return previous
 
-    @staticmethod
+    @classmethod
     def _set_clipboard_text(
+        cls,
         value,
     ):
-        win32clipboard.OpenClipboard()
+        cls._open_clipboard_with_retry()
 
         try:
             win32clipboard.EmptyClipboard()
@@ -134,6 +233,43 @@ class InputManager:
             )
         finally:
             win32clipboard.CloseClipboard()
+
+    @staticmethod
+    def _send_ctrl_combo(
+        virtual_key,
+    ):
+        """
+        Send one Ctrl+key chord and always attempt to release both keys.
+        A transient Win32 failure must never leave Ctrl logically pressed.
+        """
+        try:
+            win32api.keybd_event(
+                win32con.VK_CONTROL,
+                0,
+                0,
+                0,
+            )
+            win32api.keybd_event(
+                virtual_key,
+                0,
+                0,
+                0,
+            )
+        finally:
+            try:
+                win32api.keybd_event(
+                    virtual_key,
+                    0,
+                    win32con.KEYEVENTF_KEYUP,
+                    0,
+                )
+            finally:
+                win32api.keybd_event(
+                    win32con.VK_CONTROL,
+                    0,
+                    win32con.KEYEVENTF_KEYUP,
+                    0,
+                )
 
     @classmethod
     def _physical_paste(
@@ -152,6 +288,8 @@ class InputManager:
                 cls._read_clipboard_text()
             )
         except Exception:
+            # Clipboard restore is best-effort. Failure to read the previous
+            # user clipboard must not prevent login.
             previous = None
 
         try:
@@ -159,61 +297,33 @@ class InputManager:
                 text
             )
 
+            if not cls._foreground_is_target(
+                hwnd
+            ):
+                cls._bring_game_forward(
+                    hwnd
+                )
+
             # Replace any remembered/autofilled field content.
-            win32api.keybd_event(
-                win32con.VK_CONTROL,
-                0,
-                0,
-                0,
-            )
-            win32api.keybd_event(
-                ord("A"),
-                0,
-                0,
-                0,
-            )
-            win32api.keybd_event(
-                ord("A"),
-                0,
-                win32con.KEYEVENTF_KEYUP,
-                0,
-            )
-            win32api.keybd_event(
-                win32con.VK_CONTROL,
-                0,
-                win32con.KEYEVENTF_KEYUP,
-                0,
+            cls._send_ctrl_combo(
+                ord("A")
             )
             time.sleep(0.03)
 
-            win32api.keybd_event(
-                win32con.VK_CONTROL,
-                0,
-                0,
-                0,
-            )
-            win32api.keybd_event(
-                ord("V"),
-                0,
-                0,
-                0,
-            )
-            win32api.keybd_event(
-                ord("V"),
-                0,
-                win32con.KEYEVENTF_KEYUP,
-                0,
-            )
-            win32api.keybd_event(
-                win32con.VK_CONTROL,
-                0,
-                win32con.KEYEVENTF_KEYUP,
-                0,
+            if not cls._foreground_is_target(
+                hwnd
+            ):
+                cls._bring_game_forward(
+                    hwnd
+                )
+
+            cls._send_ctrl_combo(
+                ord("V")
             )
 
-            # Give the Unity input field time to consume WM/keyboard events
-            # before restoring the user's clipboard text.
-            time.sleep(0.08)
+            # Give the Unity input field time to consume keyboard events before
+            # restoring the user's clipboard text.
+            time.sleep(0.10)
 
         finally:
             try:
@@ -222,7 +332,7 @@ class InputManager:
                         previous
                     )
                 else:
-                    win32clipboard.OpenClipboard()
+                    cls._open_clipboard_with_retry()
                     try:
                         win32clipboard.EmptyClipboard()
                     finally:
