@@ -1,8 +1,9 @@
+import ctypes
+from ctypes import wintypes
 import threading
 import time
 
 import win32api
-import win32clipboard
 import win32con
 import win32gui
 import win32process
@@ -10,8 +11,62 @@ import win32process
 
 FOREGROUND_RETRY_COUNT = 8
 FOREGROUND_RETRY_DELAY = 0.04
-CLIPBOARD_RETRY_COUNT = 10
-CLIPBOARD_RETRY_DELAY = 0.02
+UNICODE_KEY_DELAY = 0.002
+
+INPUT_KEYBOARD = 1
+KEYEVENTF_UNICODE = 0x0004
+
+
+ULONG_PTR = (
+    ctypes.c_ulonglong
+    if ctypes.sizeof(ctypes.c_void_p) == 8
+    else ctypes.c_ulong
+)
+
+
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = (
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    )
+
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = (
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    )
+
+
+class _HARDWAREINPUT(ctypes.Structure):
+    _fields_ = (
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    )
+
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = (
+        ("mi", _MOUSEINPUT),
+        ("ki", _KEYBDINPUT),
+        ("hi", _HARDWAREINPUT),
+    )
+
+
+class _INPUT(ctypes.Structure):
+    _anonymous_ = ("union",)
+    _fields_ = (
+        ("type", wintypes.DWORD),
+        ("union", _INPUTUNION),
+    )
 
 
 class GlobalInputLock:
@@ -169,72 +224,6 @@ class InputManager:
         )
 
     @staticmethod
-    def _open_clipboard_with_retry():
-        last_error = None
-
-        for _attempt in range(
-            CLIPBOARD_RETRY_COUNT
-        ):
-            try:
-                win32clipboard.OpenClipboard()
-                return
-            except Exception as exc:
-                last_error = exc
-                time.sleep(
-                    CLIPBOARD_RETRY_DELAY
-                )
-
-        raise RuntimeError(
-            (
-                "Không mở được Windows clipboard"
-                + (
-                    f": {last_error}"
-                    if last_error is not None
-                    else ""
-                )
-            )
-        )
-
-    @classmethod
-    def _read_clipboard_text(
-        cls,
-    ):
-        previous = None
-
-        cls._open_clipboard_with_retry()
-
-        try:
-            if win32clipboard.IsClipboardFormatAvailable(
-                win32con.CF_UNICODETEXT
-            ):
-                previous = (
-                    win32clipboard
-                    .GetClipboardData(
-                        win32con.CF_UNICODETEXT
-                    )
-                )
-        finally:
-            win32clipboard.CloseClipboard()
-
-        return previous
-
-    @classmethod
-    def _set_clipboard_text(
-        cls,
-        value,
-    ):
-        cls._open_clipboard_with_retry()
-
-        try:
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardData(
-                win32con.CF_UNICODETEXT,
-                str(value),
-            )
-        finally:
-            win32clipboard.CloseClipboard()
-
-    @staticmethod
     def _send_ctrl_combo(
         virtual_key,
     ):
@@ -271,74 +260,133 @@ class InputManager:
                     0,
                 )
 
+    @staticmethod
+    def _unicode_input(
+        code_unit,
+        *,
+        key_up=False,
+    ):
+        flags = KEYEVENTF_UNICODE
+
+        if key_up:
+            flags |= win32con.KEYEVENTF_KEYUP
+
+        return _INPUT(
+            type=INPUT_KEYBOARD,
+            union=_INPUTUNION(
+                ki=_KEYBDINPUT(
+                    wVk=0,
+                    wScan=code_unit,
+                    dwFlags=flags,
+                    time=0,
+                    dwExtraInfo=0,
+                )
+            ),
+        )
+
+    @classmethod
+    def _send_unicode_text(
+        cls,
+        text,
+    ):
+        """
+        Type text without touching the Windows clipboard.
+
+        UTF-16 code units are sent as KEYEVENTF_UNICODE key-down/key-up pairs.
+        This avoids pywin32 SetClipboardData, which was observed causing
+        process-wide heap corruption (0xc0000374) during the second credential
+        field paste on Python 3.14/Windows.
+        """
+        encoded = str(text).encode(
+            "utf-16-le"
+        )
+
+        if not encoded:
+            return
+
+        code_units = [
+            int.from_bytes(
+                encoded[index:index + 2],
+                "little",
+            )
+            for index in range(
+                0,
+                len(encoded),
+                2,
+            )
+        ]
+
+        user32 = ctypes.windll.user32
+
+        for code_unit in code_units:
+            events = (
+                _INPUT * 2
+            )(
+                cls._unicode_input(
+                    code_unit,
+                    key_up=False,
+                ),
+                cls._unicode_input(
+                    code_unit,
+                    key_up=True,
+                ),
+            )
+
+            sent = user32.SendInput(
+                len(events),
+                events,
+                ctypes.sizeof(_INPUT),
+            )
+
+            if sent != len(events):
+                raise ctypes.WinError(
+                    ctypes.get_last_error()
+                )
+
+            if UNICODE_KEY_DELAY:
+                time.sleep(
+                    UNICODE_KEY_DELAY
+                )
+
     @classmethod
     def _physical_paste(
         cls,
         hwnd,
         text,
     ):
+        """
+        Replace the focused field and type the value directly.
+
+        Kept under the historical "paste" method name for API compatibility,
+        but the implementation intentionally does NOT use the clipboard.
+        """
         cls._bring_game_forward(
             hwnd
         )
 
-        previous = None
-
-        try:
-            previous = (
-                cls._read_clipboard_text()
-            )
-        except Exception:
-            # Clipboard restore is best-effort. Failure to read the previous
-            # user clipboard must not prevent login.
-            previous = None
-
-        try:
-            cls._set_clipboard_text(
-                text
-            )
-
-            if not cls._foreground_is_target(
+        if not cls._foreground_is_target(
+            hwnd
+        ):
+            cls._bring_game_forward(
                 hwnd
-            ):
-                cls._bring_game_forward(
-                    hwnd
-                )
-
-            # Replace any remembered/autofilled field content.
-            cls._send_ctrl_combo(
-                ord("A")
             )
-            time.sleep(0.03)
 
-            if not cls._foreground_is_target(
+        cls._send_ctrl_combo(
+            ord("A")
+        )
+        time.sleep(0.03)
+
+        if not cls._foreground_is_target(
+            hwnd
+        ):
+            cls._bring_game_forward(
                 hwnd
-            ):
-                cls._bring_game_forward(
-                    hwnd
-                )
-
-            cls._send_ctrl_combo(
-                ord("V")
             )
 
-            # Give the Unity input field time to consume keyboard events before
-            # restoring the user's clipboard text.
-            time.sleep(0.10)
-
-        finally:
-            try:
-                if previous is not None:
-                    cls._set_clipboard_text(
-                        previous
-                    )
-                else:
-                    cls._open_clipboard_with_retry()
-                    try:
-                        win32clipboard.EmptyClipboard()
-                    finally:
-                        win32clipboard.CloseClipboard()
-            except Exception:
-                pass
+        cls._send_unicode_text(
+            text
+        )
+        time.sleep(0.05)
 
     @staticmethod
     def _validate_target(
@@ -425,10 +473,11 @@ class InputManager:
         expected_pid=None,
     ):
         """
-        Atomically focus one game input field and paste text into it.
+        Atomically focus one game input field and enter text into it.
 
-        The global input lock covers click + clipboard paste so another
-        profile cannot steal foreground between the two actions.
+        The global input lock covers click + direct Unicode keyboard input so
+        another profile cannot steal foreground between the two actions.
+        No Windows clipboard APIs are used.
         """
         if not self._acquire(
             stop_event
