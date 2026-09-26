@@ -2140,8 +2140,7 @@ class LauncherApp(ctk.CTk):
                         )
                     )
 
-                    self.after(
-                        0,
+                    self._queue_ui_call(
                         self._status,
                         profile.profile_id,
                         "Copying Game",
@@ -2159,8 +2158,7 @@ class LauncherApp(ctk.CTk):
                         profile.profile_id
                     )
 
-                    self.after(
-                        0,
+                    self._queue_ui_call(
                         self._status,
                         profile.profile_id,
                         "Chưa đăng nhập",
@@ -2184,8 +2182,7 @@ class LauncherApp(ctk.CTk):
                         )
                     )
 
-            self.after(
-                0,
+            self._queue_ui_call(
                 self._finish_account_import,
                 tuple(created_ids),
                 tuple(failed),
@@ -2553,8 +2550,7 @@ class LauncherApp(ctk.CTk):
         ] = cancel
 
         def post_status(state):
-            self.after(
-                0,
+            self._queue_ui_call(
                 self._status,
                 profile.profile_id,
                 state.replace(
@@ -2582,8 +2578,7 @@ class LauncherApp(ctk.CTk):
                         f"server={credentials.server!r}"
                     )
                 )
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._status,
                     profile.profile_id,
                     "Launching Game",
@@ -2622,8 +2617,7 @@ class LauncherApp(ctk.CTk):
                     # The window joins the chosen layout before credential
                     # typing starts, so foreground clicks remain predictable
                     # even with many accounts.
-                    self.after(
-                        0,
+                    self._queue_ui_call(
                         self._apply_window_layout,
                     )
                     cancel.wait(0.25)
@@ -2684,8 +2678,7 @@ class LauncherApp(ctk.CTk):
                             )
                         )
 
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._auto_login_success,
                     profile.profile_id,
                     self._account_name(
@@ -2694,22 +2687,19 @@ class LauncherApp(ctk.CTk):
                 )
 
             except InterruptedError:
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._status,
                     profile.profile_id,
                     "Stopped",
                 )
 
             except Exception as exc:
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._error,
                     profile.profile_id,
                     exc,
                 )
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._notify,
                     (
                         f"{self._account_name(profile)}: "
@@ -2764,8 +2754,7 @@ class LauncherApp(ctk.CTk):
                             context.window_handle = None
                             context.process_id = None
 
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._auto_login_finished,
                     profile.profile_id,
                     on_complete,
@@ -3182,6 +3171,23 @@ class LauncherApp(ctk.CTk):
                 )
             )
             self._update_source_status()
+
+    def _queue_ui_call(
+        self,
+        callback,
+        *args,
+    ):
+        """Queue a Tk/UI callback from any background thread."""
+        if self._closing:
+            return
+
+        self._worker_event_queue.put(
+            (
+                "call",
+                callback,
+                args,
+            )
+        )
 
     def _worker_callbacks(self):
         # Tkinter is not thread-safe. Worker callbacks run on automation
@@ -3666,16 +3672,20 @@ class LauncherApp(ctk.CTk):
         self._batch_layout_needed = False
 
         try:
-            for kind, profile_id, payload in events:
+            for kind, target, payload in events:
                 if kind == "status":
                     self._worker_status(
-                        profile_id,
+                        target,
                         payload,
                     )
                 elif kind == "error":
                     self._worker_error(
-                        profile_id,
+                        target,
                         payload,
+                    )
+                elif kind == "call":
+                    target(
+                        *payload
                     )
         finally:
             self._batch_worker_ui = False
