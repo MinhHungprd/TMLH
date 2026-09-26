@@ -3640,13 +3640,35 @@ class LauncherApp(ctk.CTk):
             )
 
     def _apply_window_layout(self):
-        if self.window_layout_mode == "stack":
-            self._stack_windows(
-                remember=False,
-            )
-        else:
-            self._arrange_windows(
-                remember=False,
+        if self._closing:
+            return
+
+        try:
+            if self.window_layout_mode == "stack":
+                self._stack_windows(
+                    remember=False,
+                )
+            else:
+                self._arrange_windows(
+                    remember=False,
+                )
+        except (
+            pywintypes.error,
+            OSError,
+            ValueError,
+        ) as exc:
+            # Game windows are volatile while Unity starts/recreates them.
+            # A transient HWND/monitor failure should skip one layout pass,
+            # not terminate the Tk callback or the management UI.
+            self._last_layout_signature = None
+            self._log_queue.put(
+                (
+                    "App",
+                    (
+                        "Layout skipped after transient "
+                        f"window error: {exc}"
+                    ),
+                )
             )
 
     # ------------------------------------------------------------------
@@ -3671,24 +3693,51 @@ class LauncherApp(ctk.CTk):
         self._batch_refresh_needed = False
         self._batch_layout_needed = False
 
+        ui_failures = []
+
         try:
             for kind, target, payload in events:
-                if kind == "status":
-                    self._worker_status(
-                        target,
-                        payload,
+                try:
+                    if kind == "status":
+                        self._worker_status(
+                            target,
+                            payload,
+                        )
+                    elif kind == "error":
+                        self._worker_error(
+                            target,
+                            payload,
+                        )
+                    elif kind == "call":
+                        target(
+                            *payload
+                        )
+                except tk.TclError:
+                    if self._closing:
+                        break
+                    ui_failures.append(
+                        f"{kind}: TclError"
                     )
-                elif kind == "error":
-                    self._worker_error(
-                        target,
-                        payload,
-                    )
-                elif kind == "call":
-                    target(
-                        *payload
+                except Exception as exc:
+                    # Keep the queue alive even if one profile/widget update
+                    # races with deletion or a transient native operation.
+                    ui_failures.append(
+                        (
+                            f"{kind}: "
+                            f"{type(exc).__name__}: "
+                            f"{exc}"
+                        )
                     )
         finally:
             self._batch_worker_ui = False
+
+        for message in ui_failures[:10]:
+            self._log_queue.put(
+                (
+                    "App",
+                    f"UI event skipped: {message}",
+                )
+            )
 
         try:
             if self._batch_refresh_needed:
