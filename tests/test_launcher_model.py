@@ -1,7 +1,10 @@
+from collections import deque
 from pathlib import Path
 import queue
+from types import SimpleNamespace
 
 from launcher_gui import LauncherApp, ProfileController
+from profile_models import Profile
 from profile_manager import ProfileManager
 from profile_storage import ProfileStorage
 from app_settings import AppSettingsStorage
@@ -287,3 +290,127 @@ def test_worker_event_flush_survives_one_bad_ui_callback():
     assert profile == "App"
     assert "UI event skipped" in message
     assert "bad callback" in message
+
+
+def test_sorted_profiles_can_group_by_server():
+    class Value:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+    profiles = [
+        Profile(
+            "b",
+            "b",
+            "b",
+            True,
+            "trom_cho",
+            320,
+            180,
+            "2026",
+            account_username="beta",
+            server="server_3",
+        ),
+        Profile(
+            "c",
+            "c",
+            "c",
+            True,
+            "trom_cho",
+            320,
+            180,
+            "2026",
+            account_username="charlie",
+            server="van_lang",
+        ),
+        Profile(
+            "a",
+            "a",
+            "a",
+            True,
+            "trom_cho",
+            320,
+            180,
+            "2026",
+            account_username="alpha",
+            server="au_lac",
+        ),
+        Profile(
+            "d",
+            "d",
+            "d",
+            True,
+            "trom_cho",
+            320,
+            180,
+            "2026",
+            account_username="adam",
+            server="van_lang",
+        ),
+    ]
+
+    app = SimpleNamespace(
+        controller=SimpleNamespace(
+            profiles=profiles
+        ),
+        search_text=Value(""),
+        status_filter=Value("Tất cả"),
+        sort_mode=Value("Server"),
+        statuses={},
+    )
+    app._account_name = (
+        LauncherApp._account_name
+    )
+    app._runtime_status = (
+        lambda _profile: "Ready"
+    )
+
+    ordered = (
+        LauncherApp._sorted_profiles(
+            app
+        )
+    )
+
+    assert [
+        item.account_username
+        for item in ordered
+    ] == [
+        "adam",
+        "charlie",
+        "alpha",
+        "beta",
+    ]
+
+
+def test_collapsed_log_panel_does_not_touch_text_widget():
+    class ExplodingLog:
+        def __getattr__(self, _name):
+            raise AssertionError(
+                "collapsed log touched Tk widget"
+            )
+
+    app = SimpleNamespace(
+        _closing=False,
+        _log_backlog=deque(
+            maxlen=300
+        ),
+        _log_expanded=False,
+        log=ExplodingLog(),
+    )
+
+    LauncherApp._append_log_batch(
+        app,
+        [
+            ("line 1\n", "info"),
+            ("line 2\n", "warning"),
+        ],
+    )
+
+    assert list(
+        app._log_backlog
+    ) == [
+        ("line 1\n", "info"),
+        ("line 2\n", "warning"),
+    ]
