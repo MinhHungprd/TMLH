@@ -20,6 +20,7 @@ class AccountImportDialog(ctk.CTkToplevel):
     ):
         super().__init__(master)
 
+        self._owner = master
         self.existing_usernames = tuple(
             existing_usernames
         )
@@ -68,7 +69,7 @@ class AccountImportDialog(ctk.CTkToplevel):
             self,
             text=(
                 "Mỗi dòng: tài khoản | mật khẩu | sv   •   "
-                "sv: 1 = Văn Lang, 2 = Âu Lạc, 3 = Server 3"
+                "sv: 1 = Văn Lang, 2 = Âu Lạc, 3 = Vạn Xuân"
             ),
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=12),
@@ -287,10 +288,31 @@ class AccountImportDialog(ctk.CTkToplevel):
         if not entries:
             return
 
-        self.on_import(
-            entries,
-            bool(
-                self.auto_login_var.get()
-            ),
+        auto_login = bool(
+            self.auto_login_var.get()
         )
+        callback = self.on_import
+        owner = self._owner
+
+        # Close/release the modal first. Starting account import while this
+        # Toplevel still owns the Tk grab can race launcher refresh/iconify
+        # during auto-login and make the management UI unstable.
+        try:
+            self.import_button.configure(
+                state="disabled"
+            )
+            self.grab_release()
+        except tk.TclError:
+            pass
+
         self.destroy()
+
+        try:
+            owner.after_idle(
+                callback,
+                entries,
+                auto_login,
+            )
+        except tk.TclError:
+            # Owner is already closing; do not invoke UI work on dead widgets.
+            return

@@ -28,6 +28,7 @@ class SignalCheck:
     detected: bool
     action: str | None
     coordinates: tuple[int, int] | None = None
+    signal_name: str | None = None
 
 
 class GameStateDetector:
@@ -69,12 +70,14 @@ class GameStateDetector:
             return SignalCheck(
                 False,
                 None,
+                signal_name=name,
             )
 
         if name == "s1":
             return SignalCheck(
                 True,
                 None,
+                signal_name=name,
             )
 
         x, y, w, h = roi
@@ -86,6 +89,7 @@ class GameStateDetector:
                 x + w // 2,
                 y + h // 2,
             ),
+            signal_name=name,
         )
 
     def _match_region(
@@ -99,7 +103,7 @@ class GameStateDetector:
 
         The native frame is cropped first and only the small padded search
         area is resized back to canonical coordinates. This keeps the same
-        template, padding and 0.82 threshold without resizing the full frame.
+        template, padding and 0.7 threshold without resizing the full frame.
         """
         template = self.assets.get(
             asset_name,
@@ -130,7 +134,7 @@ class GameStateDetector:
             result.max()
         )
 
-        return score >= 0.82
+        return score >= 0.7
 
     def _match(
         self,
@@ -199,6 +203,7 @@ class GameStateDetector:
                 return SignalCheck(
                     False,
                     None,
+                    signal_name=name,
                 )
 
             client_width = (
@@ -212,6 +217,7 @@ class GameStateDetector:
                 return SignalCheck(
                     True,
                     None,
+                    signal_name=name,
                 )
 
             return SignalCheck(
@@ -222,6 +228,7 @@ class GameStateDetector:
                     client_width,
                     client_height,
                 ),
+                signal_name=name,
             )
 
         raw = self.capture(
@@ -288,12 +295,14 @@ class GameStateDetector:
             return SignalCheck(
                 False,
                 None,
+                signal_name=name,
             )
 
         if name == "s1":
             return SignalCheck(
                 True,
                 None,
+                signal_name=name,
             )
 
         return SignalCheck(
@@ -304,6 +313,7 @@ class GameStateDetector:
                 actual_width,
                 actual_height,
             ),
+            signal_name=name,
         )
 
     def check_signals(self, context):
@@ -341,6 +351,7 @@ class GameStateDetector:
                         SignalCheck(
                             False,
                             None,
+                            signal_name=name,
                         )
                     )
                     continue
@@ -350,6 +361,7 @@ class GameStateDetector:
                         SignalCheck(
                             True,
                             None,
+                            signal_name=name,
                         )
                     )
                     continue
@@ -365,6 +377,7 @@ class GameStateDetector:
                         True,
                         CLICK_CENTER,
                         click,
+                        signal_name=name,
                     )
                 )
 
@@ -442,6 +455,7 @@ class GameStateDetector:
                     SignalCheck(
                         False,
                         None,
+                        signal_name=name,
                     )
                 )
                 continue
@@ -451,6 +465,7 @@ class GameStateDetector:
                     SignalCheck(
                         True,
                         None,
+                        signal_name=name,
                     )
                 )
                 continue
@@ -470,6 +485,7 @@ class GameStateDetector:
                     True,
                     CLICK_CENTER,
                     click,
+                    signal_name=name,
                 )
             )
 

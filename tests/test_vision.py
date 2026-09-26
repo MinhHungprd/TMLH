@@ -19,6 +19,24 @@ def test_scaled_asset_cache_reuses_template():
     assert first is second
 
 
+def test_scaled_asset_cache_is_shared_across_workers():
+    first_cache = ScaledAssetCache("assets")
+    second_cache = ScaledAssetCache("assets")
+
+    first = first_cache.get(
+        "asset__x795_y29_w29_h38.png",
+        320,
+        180,
+    )
+    second = second_cache.get(
+        "asset__x795_y29_w29_h38.png",
+        320,
+        180,
+    )
+
+    assert first is second
+
+
 
 def test_normalize_roi_to_base_only_resizes_the_roi():
     small = np.zeros((8, 25), dtype=np.uint8)

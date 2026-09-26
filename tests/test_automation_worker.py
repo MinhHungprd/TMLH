@@ -1,6 +1,13 @@
+from itertools import count
 from threading import Event
 
-from automation_constants import GAME_STATE_POLL_INTERVAL
+from automation_constants import (
+    BOSS_ENTER_WAIT,
+    BOSS_OCR_INTERVAL,
+    BOSS_RESPAWN_WAIT,
+    GAME_START_WAIT,
+    GAME_STATE_POLL_INTERVAL,
+)
 from game_automation import AutomationWorker, interruptible_wait
 from game_state import SignalCheck, CLICK_CENTER
 from input_manager import InputManager
@@ -53,33 +60,80 @@ def test_interruptible_wait_returns_immediately_when_stopped():
 def test_worker_runs_boss_cycle_on_actual_pid_and_revalidates_game():
     ctx = context()
     states, commands, clicks = [], [], []
-    detector = FakeDetector([[SignalCheck(True, CLICK_CENTER, (12, 13))], [], [], [], []])
+    detector = FakeDetector(
+        [
+            [
+                SignalCheck(
+                    True,
+                    CLICK_CENTER,
+                    (12, 13),
+                    signal_name="s2",
+                )
+            ],
+            [],
+            [],
+            [],
+            [],
+        ]
+    )
 
     def wait(seconds, event):
-        if seconds == 16:
+        if seconds == BOSS_RESPAWN_WAIT:
             event.set()
             return True
         return False
 
     worker = AutomationWorker(
-        ctx, on_status=states.append, lifecycle=FakeLifecycle(), detector=detector,
-        boss_detector=FakeBoss(["", "123", "", ""]),
-        input_manager=InputManager(lambda hwnd, x, y: clicks.append((hwnd, x, y))),
-        enter=lambda pid, kind: commands.append(("enter", pid, kind)),
-        exit=lambda pid: commands.append(("exit", pid)), wait=wait,
-        now=iter([0, 1, 4]).__next__,
+        ctx,
+        on_status=states.append,
+        lifecycle=FakeLifecycle(),
+        detector=detector,
+        boss_detector=FakeBoss(
+            ["", "123", "", ""]
+        ),
+        input_manager=InputManager(
+            lambda hwnd, x, y:
+            clicks.append((hwnd, x, y))
+        ),
+        enter=lambda pid, kind:
+        commands.append(
+            ("enter", pid, kind)
+        ),
+        exit=lambda pid:
+        commands.append(("exit", pid)),
+        wait=wait,
+        now=count(0, 4).__next__,
+        gameplay_ready=lambda _pid: True,
+        boss_scan_stagger=0,
     )
+
     worker.run()
-    assert ctx.process_id == 202 and ctx.window_handle == 303
-    assert clicks == [(303, 12, 13)]
-    assert commands == [("enter", 202, "trom_cho"), ("exit", 202)]
+
+    assert (
+        ctx.process_id == 202
+        and ctx.window_handle == 303
+    )
+    assert clicks == [
+        (303, 12, 13)
+    ]
+    assert commands == [
+        ("enter", 202, "trom_cho"),
+        ("exit", 202),
+    ]
     assert states.count("BOSS_DEAD") == 1
-    assert "BOSS_CHECK_1_2_FAILED" in states
+    assert "BOSS_DEAD_CONFIRMING" in states
+    assert "BOSS_ALIVE" in states
     assert ctx.state == "STOPPED"
 
 
 def test_stop_during_each_wait_prevents_new_external_actions():
-    for stop_at in (10, GAME_STATE_POLL_INTERVAL, 3, 2, 16):
+    for stop_at in (
+        GAME_START_WAIT,
+        GAME_STATE_POLL_INTERVAL,
+        BOSS_ENTER_WAIT,
+        BOSS_OCR_INTERVAL,
+        BOSS_RESPAWN_WAIT,
+    ):
         ctx = context()
         commands = []
         errors = []
@@ -90,20 +144,295 @@ def test_stop_during_each_wait_prevents_new_external_actions():
                 return True
             return False
 
-        worker = AutomationWorker(
-            ctx, on_error=errors.append, lifecycle=FakeLifecycle(), detector=FakeDetector([[], [], []]),
-            boss_detector=FakeBoss(["123", "", ""]),
-            input_manager=InputManager(lambda *args: commands.append("click")),
-            enter=lambda *args: commands.append("enter"),
-            exit=lambda *args: commands.append("exit"), wait=wait,
-            now=iter([0, 4]).__next__,
+        detector_results = (
+            [[], [], [], []]
+            if stop_at
+            == GAME_STATE_POLL_INTERVAL
+            else [
+                [
+                    SignalCheck(
+                        True,
+                        CLICK_CENTER,
+                        (12, 13),
+                        signal_name="s2",
+                    )
+                ],
+                [],
+                [],
+                [],
+            ]
         )
+
+        worker = AutomationWorker(
+            ctx,
+            on_error=errors.append,
+            lifecycle=FakeLifecycle(),
+            detector=FakeDetector(
+                detector_results
+            ),
+            boss_detector=FakeBoss(
+                ["123", "", ""]
+            ),
+            input_manager=InputManager(
+                lambda *args:
+                commands.append("click")
+            ),
+            enter=lambda *args:
+            commands.append("enter"),
+            exit=lambda *args:
+            commands.append("exit"),
+            wait=wait,
+            now=count(0, 4).__next__,
+            gameplay_ready=lambda _pid: True,
+            boss_scan_stagger=0,
+        )
+
         worker.run()
-        assert ctx.state == "STOPPED", (stop_at, errors)
-        if stop_at in (10, GAME_STATE_POLL_INTERVAL):
+
+        assert ctx.state == "STOPPED", (
+            stop_at,
+            errors,
+        )
+        assert errors == []
+
+        if stop_at in (
+            GAME_START_WAIT,
+            GAME_STATE_POLL_INTERVAL,
+        ):
             assert commands == []
-        if stop_at == 3:
-            assert commands == ["enter"]
+        elif stop_at in (
+            BOSS_ENTER_WAIT,
+            BOSS_OCR_INTERVAL,
+        ):
+            assert commands == [
+                "click",
+                "enter",
+            ]
+        else:
+            assert commands == [
+                "click",
+                "enter",
+                "exit",
+            ]
+
+
+def _startup_checks(
+    *,
+    s2=False,
+):
+    return [
+        SignalCheck(
+            False,
+            None,
+            signal_name="s1",
+        ),
+        SignalCheck(
+            s2,
+            CLICK_CENTER if s2 else None,
+            (12, 13) if s2 else None,
+            signal_name="s2",
+        ),
+        SignalCheck(
+            False,
+            None,
+            signal_name="s3",
+        ),
+    ]
+
+
+def test_fresh_launch_does_not_timeout_before_s2():
+    ctx = context()
+    ctx.process_id = 202
+    ctx.window_handle = 303
+
+    class Detector:
+        def __init__(self):
+            self.calls = 0
+
+        def check_signals(self, _ctx):
+            self.calls += 1
+            return _startup_checks(
+                s2=False
+            )
+
+    detector = Detector()
+
+    class Clock:
+        def __init__(self):
+            self.value = 0.0
+            self.waits = 0
+
+        def now(self):
+            return self.value
+
+        def wait(self, _seconds, event):
+            # Simulate a very slow Unity load. The configured timeout is only
+            # 5s in this test, yet hundreds of seconds may pass before s2.
+            self.value += 100.0
+            self.waits += 1
+
+            if self.waits >= 4:
+                event.set()
+                return True
+
+            return False
+
+    clock = Clock()
+    gameplay_calls = []
+
+    worker = AutomationWorker(
+        ctx,
+        lifecycle=FakeLifecycle(),
+        detector=detector,
+        input_manager=InputManager(
+            lambda *args: None
+        ),
+        wait=clock.wait,
+        now=clock.now,
+        gameplay_ready=lambda pid:
+        gameplay_calls.append(pid)
+        or True,
+        boss_scan_stagger=0,
+    )
+
+    assert worker._ensure_in_game(
+        require_gameplay_socket=True,
+        timeout=5.0,
+        startup_gate_signal="s2",
+    ) is False
+
+    assert clock.value >= 400.0
+    assert gameplay_calls == []
+
+
+def test_s2_arms_timeout_and_allows_ingame_confirmation():
+    ctx = context()
+    ctx.process_id = 202
+    ctx.window_handle = 303
+
+    class Detector:
+        def __init__(self):
+            self.calls = 0
+
+        def check_signals(self, _ctx):
+            self.calls += 1
+
+            if self.calls < 4:
+                return _startup_checks(
+                    s2=False
+                )
+
+            if self.calls == 4:
+                return _startup_checks(
+                    s2=True
+                )
+
+            return _startup_checks(
+                s2=False
+            )
+
+    detector = Detector()
+
+    class Clock:
+        def __init__(self):
+            self.value = 0.0
+
+        def now(self):
+            return self.value
+
+        def wait(self, seconds, _event):
+            # Before s2, deliberately advance far beyond the 5s timeout.
+            if detector.calls < 4:
+                self.value += 100.0
+            else:
+                self.value += seconds
+            return False
+
+    clock = Clock()
+    logs = []
+
+    worker = AutomationWorker(
+        ctx,
+        lifecycle=FakeLifecycle(),
+        detector=detector,
+        input_manager=InputManager(
+            lambda *args: None
+        ),
+        wait=clock.wait,
+        now=clock.now,
+        gameplay_ready=lambda _pid: True,
+        on_log=logs.append,
+        boss_scan_stagger=0,
+    )
+
+    assert worker._ensure_in_game(
+        require_gameplay_socket=True,
+        timeout=5.0,
+        startup_gate_signal="s2",
+    ) is True
+
+    assert clock.value > 300.0
+    assert any(
+        "STARTUP GATE s2 detected"
+        in message
+        for message in logs
+    )
+
+
+def test_s2_starts_timeout_when_gameplay_socket_never_arrives():
+    ctx = context()
+    ctx.process_id = 202
+    ctx.window_handle = 303
+
+    class Detector:
+        def __init__(self):
+            self.calls = 0
+
+        def check_signals(self, _ctx):
+            self.calls += 1
+
+            return _startup_checks(
+                s2=self.calls == 1
+            )
+
+    class Clock:
+        def __init__(self):
+            self.value = 0.0
+
+        def now(self):
+            return self.value
+
+        def wait(self, seconds, _event):
+            self.value += seconds
+            return False
+
+    clock = Clock()
+
+    worker = AutomationWorker(
+        ctx,
+        lifecycle=FakeLifecycle(),
+        detector=Detector(),
+        input_manager=InputManager(
+            lambda *args: None
+        ),
+        wait=clock.wait,
+        now=clock.now,
+        gameplay_ready=lambda _pid: False,
+        boss_scan_stagger=0,
+    )
+
+    try:
+        worker._ensure_in_game(
+            require_gameplay_socket=True,
+            timeout=5.0,
+            startup_gate_signal="s2",
+        )
+    except RuntimeError as exc:
+        assert "5" in str(exc)
+    else:
+        raise AssertionError(
+            "Expected in-game timeout after s2"
+        )
 
 
 def test_input_manager_serializes_click():

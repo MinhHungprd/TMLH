@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+import faulthandler
 import inspect
 import queue
 import sys
 import threading
 import time
+import traceback
 import tkinter as tk
 from tkinter import filedialog
 
 import customtkinter as ctk
+import pywintypes
 
 from account_import_dialog import AccountImportDialog
 from app_settings import AppSettings, AppSettingsStorage
@@ -23,6 +27,7 @@ from boss.enter_boss import BOSSES
 from game_automation import AutomationWorker
 from profile_auth import (
     clear_current_auth_values,
+    clear_profile_auth_if_current,
     save_profile_auth,
 )
 from profile_credentials import (
@@ -56,6 +61,18 @@ from window_manager import (
 
 SIZES = tuple(f"{w}x{h}" for w, h in RESOLUTIONS)
 
+SERVER_SORT_ORDER = {
+    "van_lang": 0,
+    "au_lac": 1,
+    "server_3": 2,
+}
+
+# Keep worker/debug logging cheap for large account counts. Important
+# status/error logs still go through immediately when the panel is open.
+WORKER_LOG_UI_INTERVAL_SECONDS = 2.0
+WORKER_LOG_FLUSH_MS = 300
+LOG_BACKLOG_MAX_LINES = 300
+
 # Fast auth confirmation after the automated submit. Registry writes usually
 # appear quickly; poll more often and avoid keeping the UI in a pending state
 # for the previous 20 seconds.
@@ -67,6 +84,104 @@ def get_app_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
+
+
+def _install_crash_logging(
+    root,
+):
+    """
+    Keep a persistent traceback even for windowed PyInstaller builds where
+    stderr is not visible. This is diagnostic-only and must never crash app
+    startup if the log file cannot be opened.
+    """
+    path = Path(root) / "TMLH_Bot_crash.log"
+
+    try:
+        stream = open(
+            path,
+            "a",
+            encoding="utf-8",
+            buffering=1,
+        )
+    except OSError:
+        return None
+
+    try:
+        stream.write(
+            (
+                "\n"
+                + "=" * 72
+                + f"\nSTART {datetime.now():%Y-%m-%d %H:%M:%S}\n"
+            )
+        )
+        faulthandler.enable(
+            file=stream,
+            all_threads=True,
+        )
+    except Exception:
+        pass
+
+    old_sys_hook = sys.excepthook
+
+    def sys_hook(
+        exc_type,
+        exc_value,
+        exc_tb,
+    ):
+        try:
+            stream.write(
+                "\n[UNHANDLED MAIN THREAD]\n"
+            )
+            traceback.print_exception(
+                exc_type,
+                exc_value,
+                exc_tb,
+                file=stream,
+            )
+            stream.flush()
+        except Exception:
+            pass
+
+        old_sys_hook(
+            exc_type,
+            exc_value,
+            exc_tb,
+        )
+
+    sys.excepthook = sys_hook
+
+    old_thread_hook = getattr(
+        threading,
+        "excepthook",
+        None,
+    )
+
+    if old_thread_hook is not None:
+        def thread_hook(args):
+            try:
+                stream.write(
+                    (
+                        "\n[UNHANDLED THREAD] "
+                        f"{getattr(args.thread, 'name', '?')}\n"
+                    )
+                )
+                traceback.print_exception(
+                    args.exc_type,
+                    args.exc_value,
+                    args.exc_traceback,
+                    file=stream,
+                )
+                stream.flush()
+            except Exception:
+                pass
+
+            old_thread_hook(
+                args
+            )
+
+        threading.excepthook = thread_hook
+
+    return stream
 
 
 class ProfileController:
@@ -92,6 +207,13 @@ class ProfileController:
     def get(self, profile_id):
         with self._storage_lock:
             return next(profile for profile in self.profiles if profile.profile_id == profile_id)
+
+    def snapshot_profiles(self):
+        """Return a stable immutable snapshot for UI/background readers."""
+        with self._storage_lock:
+            return tuple(
+                self.profiles
+            )
 
     def _replace(self, old_profile_id, updated):
         with self._storage_lock:
@@ -210,7 +332,11 @@ class ProfileController:
                 try:
                     resize_client(hwnd, width, height)
                     set_window_topmost(hwnd, True)
-                except (ValueError, OSError):
+                except (
+                    pywintypes.error,
+                    ValueError,
+                    OSError,
+                ):
                     pass
 
         return updated
@@ -367,6 +493,14 @@ class LauncherApp(ctk.CTk):
 
         root = get_app_root()
         self.app_root = root
+        self._crash_log_stream = (
+            _install_crash_logging(
+                root
+            )
+        )
+        self._crash_log_lock = (
+            threading.Lock()
+        )
         self.controller = controller or ProfileController(root)
         self.proxy_settings_store = ProxySettingsStorage(
             root / PROXY_SETTINGS_FILENAME
@@ -415,11 +549,23 @@ class LauncherApp(ctk.CTk):
         self._pending_delete_ids = ()
         self._log_expanded = False
 
-        # Worker OCR/debug logs are batched onto the Tk thread instead of
-        # scheduling one GUI callback per profile per second.
+        # Worker threads never call Tk APIs directly. Status/error events
+        # and verbose logs cross into the GUI through thread-safe queues and
+        # are consumed only by the Tk main thread.
+        self._worker_event_queue = queue.SimpleQueue()
+        self._worker_event_flush_after_id = None
+        self._batch_worker_ui = False
+        self._batch_refresh_needed = False
+        self._batch_layout_needed = False
+
         self._log_queue = queue.SimpleQueue()
+        self._log_backlog = deque(
+            maxlen=LOG_BACKLOG_MAX_LINES
+        )
+        self._worker_log_last_ui_at = {}
         self._log_line_count = 0
         self._log_flush_after_id = None
+        self._closing = False
 
         self.title(f"{APP_NAME} - Profile Bot")
         self.geometry("640x700")
@@ -441,8 +587,12 @@ class LauncherApp(ctk.CTk):
         self._build_log_panel()
         self._build_footer()
 
+        self._worker_event_flush_after_id = self.after(
+            50,
+            self._flush_worker_events,
+        )
         self._log_flush_after_id = self.after(
-            100,
+            WORKER_LOG_FLUSH_MS,
             self._flush_worker_logs,
         )
 
@@ -861,8 +1011,8 @@ class LauncherApp(ctk.CTk):
         self.sort_combo = ctk.CTkComboBox(
             top,
             variable=self.sort_mode,
-            values=("A→Z", "Z→A", "TT"),
-            width=78,
+            values=("A→Z", "Z→A", "Server", "TT"),
+            width=92,
             height=30,
             fg_color=COLORS["input"],
             border_color=COLORS["border_bright"],
@@ -1552,6 +1702,31 @@ class LauncherApp(ctk.CTk):
             self.log_toggle_button.configure(
                 text="Đóng"
             )
+
+            # The collapsed panel does not receive Text widget writes. Render
+            # the bounded in-memory backlog once when the user opens it.
+            try:
+                self.log.configure(
+                    state="normal"
+                )
+                self.log.delete(
+                    "1.0",
+                    "end",
+                )
+                self.log.configure(
+                    state="disabled"
+                )
+                self._log_line_count = 0
+            except tk.TclError:
+                pass
+
+            backlog = tuple(
+                self._log_backlog
+            )
+            self._log_backlog.clear()
+            self._append_log_batch(
+                backlog
+            )
         else:
             self.log.grid_remove()
             self.log_panel.configure(
@@ -1627,9 +1802,17 @@ class LauncherApp(ctk.CTk):
             or profile.profile_name
         )
 
-    def _sorted_profiles(self):
+    def _sorted_profiles(
+        self,
+        profiles=None,
+    ):
+        if profiles is None:
+            profiles = (
+                self.controller.snapshot_profiles()
+            )
+
         profiles = list(
-            self.controller.profiles
+            profiles
         )
         query = (
             self.search_text.get()
@@ -1712,6 +1895,31 @@ class LauncherApp(ctk.CTk):
                 reverse=True,
             )
 
+        if mode == "Server":
+            return sorted(
+                profiles,
+                key=lambda item: (
+                    SERVER_SORT_ORDER.get(
+                        getattr(
+                            item,
+                            "server",
+                            "",
+                        ),
+                        999,
+                    ),
+                    str(
+                        getattr(
+                            item,
+                            "server",
+                            "",
+                        )
+                    ).casefold(),
+                    self._account_name(
+                        item
+                    ).casefold(),
+                ),
+            )
+
         if mode == "TT":
             return sorted(
                 profiles,
@@ -1740,10 +1948,14 @@ class LauncherApp(ctk.CTk):
         ):
             return
 
+        profile_snapshot = (
+            self.controller.snapshot_profiles()
+        )
+
         valid_ids = {
             profile.profile_id
             for profile
-            in self.controller.profiles
+            in profile_snapshot
         }
         self.checked.intersection_update(
             valid_ids
@@ -1759,12 +1971,14 @@ class LauncherApp(ctk.CTk):
             child.destroy()
 
         self.profile_rows.clear()
-        profiles = self._sorted_profiles()
+        profiles = self._sorted_profiles(
+            profile_snapshot
+        )
 
         self.profile_title.configure(
             text=(
                 f"Tài khoản "
-                f"({len(self.controller.profiles)})"
+                f"({len(profile_snapshot)})"
             )
         )
         self.selected_label.configure(
@@ -1808,7 +2022,7 @@ class LauncherApp(ctk.CTk):
         if not profiles:
             message = (
                 "Không tìm thấy tài khoản."
-                if self.controller.profiles
+                if profile_snapshot
                 else (
                     "Chưa có tài khoản. "
                     "Bấm '+ Nhập tài khoản' để bắt đầu."
@@ -1827,7 +2041,7 @@ class LauncherApp(ctk.CTk):
 
         self.account_summary.configure(
             text=(
-                f"{len(self.controller.profiles)} tài khoản • "
+                f"{len(profile_snapshot)} tài khoản • "
                 "profile được tạo/xóa tự động theo tài khoản"
             )
         )
@@ -1883,12 +2097,17 @@ class LauncherApp(ctk.CTk):
             == "TT"
             or row is None
         ):
-            self._refresh()
+            if self._batch_worker_ui:
+                self._batch_refresh_needed = True
+            else:
+                self._refresh()
         else:
             row.set_status(
                 status
             )
-            self._update_header_status()
+
+            if not self._batch_worker_ui:
+                self._update_header_status()
 
     def _focus_profile(
         self,
@@ -1935,7 +2154,7 @@ class LauncherApp(ctk.CTk):
         return tuple(
             profile.profile_id
             for profile
-            in self.controller.profiles
+            in self.controller.snapshot_profiles()
             if profile.profile_id
             in self.checked
         )
@@ -2047,7 +2266,7 @@ class LauncherApp(ctk.CTk):
                 profile
             )
             for profile
-            in self.controller.profiles
+            in self.controller.snapshot_profiles()
         ]
 
         AccountImportDialog(
@@ -2121,8 +2340,7 @@ class LauncherApp(ctk.CTk):
                         )
                     )
 
-                    self.after(
-                        0,
+                    self._queue_ui_call(
                         self._status,
                         profile.profile_id,
                         "Copying Game",
@@ -2140,8 +2358,7 @@ class LauncherApp(ctk.CTk):
                         profile.profile_id
                     )
 
-                    self.after(
-                        0,
+                    self._queue_ui_call(
                         self._status,
                         profile.profile_id,
                         "Chưa đăng nhập",
@@ -2165,8 +2382,7 @@ class LauncherApp(ctk.CTk):
                         )
                     )
 
-            self.after(
-                0,
+            self._queue_ui_call(
                 self._finish_account_import,
                 tuple(created_ids),
                 tuple(failed),
@@ -2320,7 +2536,7 @@ class LauncherApp(ctk.CTk):
         active_workers = [
             profile.profile_id
             for profile
-            in self.controller.profiles
+            in self.controller.snapshot_profiles()
             if self.controller._worker_is_active(
                 profile.profile_id
             )
@@ -2338,7 +2554,7 @@ class LauncherApp(ctk.CTk):
             return
 
         open_games = self._running_profile_games(
-            self.controller.profiles
+            self.controller.snapshot_profiles()
         )
 
         if open_games:
@@ -2366,6 +2582,19 @@ class LauncherApp(ctk.CTk):
         self._login_queue_active = True
         self._suspend_keep_above = True
 
+        # Do not compete with the game for foreground while system-wide
+        # mouse/keyboard input is used to enter credentials. Minimize the
+        # launcher automatically; the user can still restore it manually if
+        # they need to inspect or stop the queue.
+        try:
+            self.attributes(
+                "-topmost",
+                False,
+            )
+            self.iconify()
+        except tk.TclError:
+            pass
+
         self._notify(
             (
                 f"Login an toàn {len(self._login_queue)} tài khoản • "
@@ -2379,6 +2608,18 @@ class LauncherApp(ctk.CTk):
         if not self._login_queue:
             self._login_queue_active = False
             self._suspend_keep_above = False
+
+            try:
+                if not self._closing:
+                    self.deiconify()
+                    self.attributes(
+                        "-topmost",
+                        True,
+                    )
+                    self.lift()
+            except tk.TclError:
+                pass
+
             self._notify(
                 "Hàng đợi Login đã hoàn tất.",
                 "success",
@@ -2534,8 +2775,7 @@ class LauncherApp(ctk.CTk):
         ] = cancel
 
         def post_status(state):
-            self.after(
-                0,
+            self._queue_ui_call(
                 self._status,
                 profile.profile_id,
                 state.replace(
@@ -2545,6 +2785,12 @@ class LauncherApp(ctk.CTk):
             )
 
         def post_log(message):
+            self._write_runtime_trace(
+                (
+                    f"AUTOLOGIN[{profile.profile_id}] "
+                    f"{message}"
+                )
+            )
             self._log_queue.put(
                 (
                     profile.profile_id,
@@ -2563,8 +2809,7 @@ class LauncherApp(ctk.CTk):
                         f"server={credentials.server!r}"
                     )
                 )
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._status,
                     profile.profile_id,
                     "Launching Game",
@@ -2603,8 +2848,7 @@ class LauncherApp(ctk.CTk):
                     # The window joins the chosen layout before credential
                     # typing starts, so foreground clicks remain predictable
                     # even with many accounts.
-                    self.after(
-                        0,
+                    self._queue_ui_call(
                         self._apply_window_layout,
                     )
                     cancel.wait(0.25)
@@ -2613,6 +2857,18 @@ class LauncherApp(ctk.CTk):
                         on_status=post_status,
                         on_log=post_log,
                     )
+
+                    self._write_runtime_trace(
+                        (
+                            f"AUTOLOGIN[{profile.profile_id}] "
+                            "CREDENTIAL SHAPE "
+                            f"username_len={len(credentials.username)} "
+                            f"password_len={len(credentials.password)} "
+                            f"password_numeric={credentials.password.isdigit()} "
+                            f"server={credentials.server}"
+                        )
+                    )
+
                     runner.run(
                         context,
                         credentials,
@@ -2665,8 +2921,7 @@ class LauncherApp(ctk.CTk):
                             )
                         )
 
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._auto_login_success,
                     profile.profile_id,
                     self._account_name(
@@ -2675,22 +2930,19 @@ class LauncherApp(ctk.CTk):
                 )
 
             except InterruptedError:
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._status,
                     profile.profile_id,
                     "Stopped",
                 )
 
             except Exception as exc:
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._error,
                     profile.profile_id,
                     exc,
                 )
-                self.after(
-                    0,
+                self._queue_ui_call(
                     self._notify,
                     (
                         f"{self._account_name(profile)}: "
@@ -2703,35 +2955,49 @@ class LauncherApp(ctk.CTk):
                 if callable(
                     on_complete
                 ):
-                    try:
-                        self._close_login_process(
-                            context
-                        )
-                    except Exception as exc:
-                        post_log(
-                            (
-                                "Auto login cleanup warning: "
-                                f"{exc}"
-                            )
-                        )
-                    finally:
-                        # Clear only after the old game process is gone. Some
-                        # clients write Registry again while shutting down.
+                    # Shutdown may write HKCU auth again. Serialize the whole
+                    # close/cleanup sequence with normal profile launches so it
+                    # cannot race another profile's restore.
+                    with PROFILE_LAUNCH_LOCK:
                         try:
-                            clear_current_auth_values()
+                            self._close_login_process(
+                                context
+                            )
                         except Exception as exc:
                             post_log(
                                 (
-                                    "Registry cleanup warning: "
+                                    "Auto login cleanup warning: "
                                     f"{exc}"
                                 )
                             )
+                        finally:
+                            try:
+                                cleared = (
+                                    clear_profile_auth_if_current(
+                                        profile.game_path
+                                    )
+                                )
 
-                        context.window_handle = None
-                        context.process_id = None
+                                if not cleared:
+                                    post_log(
+                                        (
+                                            "Registry cleanup skipped: "
+                                            "auth belongs to another "
+                                            "profile or is already empty"
+                                        )
+                                    )
+                            except Exception as exc:
+                                post_log(
+                                    (
+                                        "Registry cleanup warning: "
+                                        f"{exc}"
+                                    )
+                                )
 
-                self.after(
-                    0,
+                            context.window_handle = None
+                            context.process_id = None
+
+                self._queue_ui_call(
                     self._auto_login_finished,
                     profile.profile_id,
                     on_complete,
@@ -3149,23 +3415,70 @@ class LauncherApp(ctk.CTk):
             )
             self._update_source_status()
 
+    def _write_runtime_trace(
+        self,
+        message,
+    ):
+        stream = getattr(
+            self,
+            "_crash_log_stream",
+            None,
+        )
+
+        if stream is None:
+            return
+
+        try:
+            with self._crash_log_lock:
+                stream.write(
+                    (
+                        f"[{datetime.now():%H:%M:%S}] "
+                        f"{message}\n"
+                    )
+                )
+                stream.flush()
+        except Exception:
+            pass
+
+    def _queue_ui_call(
+        self,
+        callback,
+        *args,
+    ):
+        """Queue a Tk/UI callback from any background thread."""
+        if self._closing:
+            return
+
+        self._worker_event_queue.put(
+            (
+                "call",
+                callback,
+                args,
+            )
+        )
+
     def _worker_callbacks(self):
+        # Tkinter is not thread-safe. Worker callbacks run on automation
+        # threads, so they only enqueue plain Python data here. The Tk main
+        # thread applies all UI mutations in _flush_worker_events().
         return {
             "on_status":
             lambda pid, state:
-            self.after(
-                0,
-                self._worker_status,
-                pid,
-                state,
+            self._worker_event_queue.put(
+                (
+                    "status",
+                    pid,
+                    state,
+                )
             ),
             "on_error":
             lambda pid, exc:
-            self.after(
-                0,
-                self._worker_error,
-                pid,
-                exc,
+            self._worker_event_queue.put(
+                (
+                    "error",
+                    pid,
+                    exc,
+                )
             ),
             "on_log":
             lambda pid, message:
@@ -3295,6 +3608,7 @@ class LauncherApp(ctk.CTk):
                         False,
                     )
                 except (
+                    pywintypes.error,
                     ValueError,
                     OSError,
                 ):
@@ -3367,17 +3681,31 @@ class LauncherApp(ctk.CTk):
 
             seen_hwnds.add(hwnd)
 
-            left, top, right, bottom = (
-                win32gui.GetWindowRect(hwnd)
-            )
+            try:
+                left, top, right, bottom = (
+                    win32gui.GetWindowRect(hwnd)
+                )
 
-            width = right - left
-            height = bottom - top
+                width = right - left
+                height = bottom - top
+
+                reveal = (
+                    boss_scan_reveal_height(
+                        hwnd
+                    )
+                    if include_reveal
+                    else None
+                )
+            except (
+                pywintypes.error,
+                OSError,
+                ValueError,
+            ):
+                # Unity can recreate/destroy HWNDs between IsWindow() and the
+                # following native calls. Skip that transient handle this pass.
+                continue
 
             if include_reveal:
-                reveal = boss_scan_reveal_height(
-                    hwnd
-                )
                 items.append(
                     (
                         hwnd,
@@ -3425,19 +3753,28 @@ class LauncherApp(ctk.CTk):
         import win32gui
 
         for place in placements:
-            if not win32gui.IsWindow(place.hwnd):
+            if not win32gui.IsWindow(
+                place.hwnd
+            ):
                 continue
 
-            win32gui.SetWindowPos(
-                place.hwnd,
-                win32con.HWND_TOPMOST,
-                place.x,
-                place.y,
-                0,
-                0,
-                win32con.SWP_NOSIZE
-                | win32con.SWP_NOACTIVATE,
-            )
+            try:
+                win32gui.SetWindowPos(
+                    place.hwnd,
+                    win32con.HWND_TOPMOST,
+                    place.x,
+                    place.y,
+                    0,
+                    0,
+                    win32con.SWP_NOSIZE
+                    | win32con.SWP_NOACTIVATE,
+                )
+            except (
+                pywintypes.error,
+                OSError,
+            ):
+                # Window was recreated/closed after the validity check.
+                continue
 
     def _arrange_windows(self, remember=True):
         if remember:
@@ -3572,18 +3909,130 @@ class LauncherApp(ctk.CTk):
             )
 
     def _apply_window_layout(self):
-        if self.window_layout_mode == "stack":
-            self._stack_windows(
-                remember=False,
-            )
-        else:
-            self._arrange_windows(
-                remember=False,
+        if self._closing:
+            return
+
+        try:
+            if self.window_layout_mode == "stack":
+                self._stack_windows(
+                    remember=False,
+                )
+            else:
+                self._arrange_windows(
+                    remember=False,
+                )
+        except (
+            pywintypes.error,
+            OSError,
+            ValueError,
+        ) as exc:
+            # Game windows are volatile while Unity starts/recreates them.
+            # A transient HWND/monitor failure should skip one layout pass,
+            # not terminate the Tk callback or the management UI.
+            self._last_layout_signature = None
+            self._log_queue.put(
+                (
+                    "App",
+                    (
+                        "Layout skipped after transient "
+                        f"window error: {exc}"
+                    ),
+                )
             )
 
     # ------------------------------------------------------------------
     # LOG / STATE
     # ------------------------------------------------------------------
+
+    def _flush_worker_events(self):
+        if self._closing:
+            return
+
+        events = []
+
+        while len(events) < 500:
+            try:
+                events.append(
+                    self._worker_event_queue.get_nowait()
+                )
+            except queue.Empty:
+                break
+
+        self._batch_worker_ui = True
+        self._batch_refresh_needed = False
+        self._batch_layout_needed = False
+
+        ui_failures = []
+
+        try:
+            for kind, target, payload in events:
+                try:
+                    if kind == "status":
+                        self._worker_status(
+                            target,
+                            payload,
+                        )
+                    elif kind == "error":
+                        self._worker_error(
+                            target,
+                            payload,
+                        )
+                    elif kind == "call":
+                        target(
+                            *payload
+                        )
+                except tk.TclError:
+                    if self._closing:
+                        break
+                    ui_failures.append(
+                        f"{kind}: TclError"
+                    )
+                except Exception as exc:
+                    # Keep the queue alive even if one profile/widget update
+                    # races with deletion or a transient native operation.
+                    ui_failures.append(
+                        (
+                            f"{kind}: "
+                            f"{type(exc).__name__}: "
+                            f"{exc}"
+                        )
+                    )
+        finally:
+            self._batch_worker_ui = False
+
+        for message in ui_failures[:10]:
+            self._log_queue.put(
+                (
+                    "App",
+                    f"UI event skipped: {message}",
+                )
+            )
+
+        try:
+            if self._batch_refresh_needed:
+                self._refresh()
+            elif events:
+                self._update_header_status()
+
+            if self._batch_layout_needed:
+                self._apply_window_layout()
+        except tk.TclError:
+            if self._closing:
+                return
+            raise
+        finally:
+            self._batch_refresh_needed = False
+            self._batch_layout_needed = False
+
+        if not self._closing:
+            try:
+                if self.winfo_exists():
+                    self._worker_event_flush_after_id = self.after(
+                        50,
+                        self._flush_worker_events,
+                    )
+            except tk.TclError:
+                self._worker_event_flush_after_id = None
 
     def _format_log_entry(self, profile, state, message=""):
         state_text = str(state).upper()
@@ -3603,42 +4052,82 @@ class LauncherApp(ctk.CTk):
         return line, tag
 
     def _append_log_batch(self, entries):
-        if not entries:
+        if (
+            not entries
+            or self._closing
+        ):
             return
 
-        self.log.configure(state="normal")
+        self._log_backlog.extend(
+            entries
+        )
 
-        for line, tag in entries:
-            try:
-                self.log._textbox.insert(
-                    "end",
-                    line,
-                    tag,
-                )
-            except Exception:
-                self.log.insert(
-                    "end",
-                    line,
-                )
+        # Hidden log panel must be virtually free: keep only the bounded RAM
+        # backlog and do not configure/insert/scroll the Tk Text widget.
+        if not self._log_expanded:
+            return
 
-        self._log_line_count += len(entries)
-
-        # Trim in chunks so long-running multi-profile sessions never make
-        # the Tk Text widget grow without bound.
-        while self._log_line_count > 1000:
-            self.log.delete(
-                "1.0",
-                "201.0",
+        try:
+            self.log.configure(
+                state="normal"
             )
-            self._log_line_count -= 200
 
-        self.log.see("end")
-        self.log.configure(state="disabled")
+            inserted = 0
+
+            for line, tag in entries:
+                try:
+                    self.log._textbox.insert(
+                        "end",
+                        line,
+                        tag,
+                    )
+                except (
+                    AttributeError,
+                    tk.TclError,
+                ):
+                    try:
+                        self.log.insert(
+                            "end",
+                            line,
+                        )
+                    except tk.TclError:
+                        break
+
+                inserted += 1
+
+            self._log_line_count += inserted
+
+            # Trim in chunks so long-running multi-profile sessions never make
+            # the Tk Text widget grow without bound.
+            while (
+                self._log_line_count
+                > LOG_BACKLOG_MAX_LINES
+            ):
+                self.log.delete(
+                    "1.0",
+                    "51.0",
+                )
+                self._log_line_count -= 50
+
+            self.log.see("end")
+            self.log.configure(
+                state="disabled"
+            )
+        except tk.TclError:
+            # The widget may be destroyed while the periodic flush is pending.
+            return
 
     def _flush_worker_logs(self):
-        entries = []
+        if self._closing:
+            return
 
-        while len(entries) < 200:
+        # Drain aggressively so producer threads never build a large queue,
+        # but keep only the newest worker/debug message per profile for this
+        # UI cycle.
+        latest_by_profile = {}
+        drained = 0
+
+        while drained < 2000:
             try:
                 profile_id, message = (
                     self._log_queue.get_nowait()
@@ -3646,6 +4135,37 @@ class LauncherApp(ctk.CTk):
             except queue.Empty:
                 break
 
+            latest_by_profile[
+                profile_id
+            ] = message
+            drained += 1
+
+        now = time.monotonic()
+        entries = []
+
+        for (
+            profile_id,
+            message,
+        ) in latest_by_profile.items():
+            last = (
+                self._worker_log_last_ui_at
+                .get(
+                    profile_id,
+                    float("-inf"),
+                )
+            )
+
+            # Worker on_log is diagnostic/noisy. Render at most one line per
+            # profile every few seconds. The newest line wins.
+            if (
+                now - last
+                < WORKER_LOG_UI_INTERVAL_SECONDS
+            ):
+                continue
+
+            self._worker_log_last_ui_at[
+                profile_id
+            ] = now
             entries.append(
                 self._format_log_entry(
                     profile_id,
@@ -3654,13 +4174,19 @@ class LauncherApp(ctk.CTk):
                 )
             )
 
-        self._append_log_batch(entries)
+        self._append_log_batch(
+            entries
+        )
 
-        if self.winfo_exists():
-            self._log_flush_after_id = self.after(
-                100,
-                self._flush_worker_logs,
-            )
+        if not self._closing:
+            try:
+                if self.winfo_exists():
+                    self._log_flush_after_id = self.after(
+                        WORKER_LOG_FLUSH_MS,
+                        self._flush_worker_logs,
+                    )
+            except tk.TclError:
+                self._log_flush_after_id = None
 
     def _log(self, profile, state, message=""):
         self._append_log_batch(
@@ -3674,9 +4200,23 @@ class LauncherApp(ctk.CTk):
         )
 
     def _clear_log(self):
-        self.log.configure(state="normal")
-        self.log.delete("1.0", "end")
-        self.log.configure(state="disabled")
+        self._log_backlog.clear()
+        self._worker_log_last_ui_at.clear()
+
+        try:
+            self.log.configure(
+                state="normal"
+            )
+            self.log.delete(
+                "1.0",
+                "end",
+            )
+            self.log.configure(
+                state="disabled"
+            )
+        except tk.TclError:
+            pass
+
         self._log_line_count = 0
 
     def _worker_log(self, profile_id, message):
@@ -3751,7 +4291,10 @@ class LauncherApp(ctk.CTk):
             "WAITING_GAME",
             "CONFIRMING_IN_GAME",
         ):
-            self._apply_window_layout()
+            if self._batch_worker_ui:
+                self._batch_layout_needed = True
+            else:
+                self._apply_window_layout()
 
     def _worker_error(self, profile_id, exc):
         self._apply_runtime_status(
@@ -3792,8 +4335,63 @@ class LauncherApp(ctk.CTk):
             "error",
         )
 
+    def report_callback_exception(
+        self,
+        exc_type,
+        exc_value,
+        exc_tb,
+    ):
+        stream = getattr(
+            self,
+            "_crash_log_stream",
+            None,
+        )
+
+        if stream is not None:
+            try:
+                stream.write(
+                    "\n[TK CALLBACK ERROR]\n"
+                )
+                traceback.print_exception(
+                    exc_type,
+                    exc_value,
+                    exc_tb,
+                    file=stream,
+                )
+                stream.flush()
+            except Exception:
+                pass
+
+        # Keep the management UI alive for ordinary Python/Tk callback errors.
+        try:
+            self._log_queue.put(
+                (
+                    "App",
+                    (
+                        "Tk callback error: "
+                        f"{exc_type.__name__}: "
+                        f"{exc_value}"
+                    ),
+                )
+            )
+        except Exception:
+            pass
+
     def _close(self):
+        if self._closing:
+            return
+
+        self._closing = True
         clear_boss_stack_order()
+
+        if self._worker_event_flush_after_id is not None:
+            try:
+                self.after_cancel(
+                    self._worker_event_flush_after_id
+                )
+            except tk.TclError:
+                pass
+            self._worker_event_flush_after_id = None
 
         if self._log_flush_after_id is not None:
             try:
@@ -3816,7 +4414,11 @@ class LauncherApp(ctk.CTk):
             if hwnd:
                 try:
                     set_window_topmost(hwnd, False)
-                except (ValueError, OSError):
+                except (
+                    pywintypes.error,
+                    ValueError,
+                    OSError,
+                ):
                     pass
 
         for context in self._login_contexts.values():
@@ -3828,10 +4430,22 @@ class LauncherApp(ctk.CTk):
                         False,
                     )
                 except (
+                    pywintypes.error,
                     ValueError,
                     OSError,
                 ):
                     pass
+
+        try:
+            stream = getattr(
+                self,
+                "_crash_log_stream",
+                None,
+            )
+            if stream is not None:
+                stream.flush()
+        except Exception:
+            pass
 
         self.destroy()
 

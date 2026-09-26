@@ -63,3 +63,31 @@ def test_parse_account_list_reports_bad_and_duplicate_lines():
         in message
         for message in messages
     )
+
+
+def test_parse_exact_two_line_van_xuan_input():
+    entries, issues = parse_account_list(
+        "dyplvrrg2|123123|3\n"
+        "dyp1ho1v3|123123|3\n"
+    )
+
+    assert issues == ()
+    assert [
+        (
+            item.username,
+            item.password,
+            item.server,
+        )
+        for item in entries
+    ] == [
+        (
+            "dyplvrrg2",
+            "123123",
+            "server_3",
+        ),
+        (
+            "dyp1ho1v3",
+            "123123",
+            "server_3",
+        ),
+    ]

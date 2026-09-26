@@ -18,6 +18,11 @@ def test_check_signals_scales_actions_per_profile_without_mouse_input():
     detector = GameStateDetector(lambda name, roi: name in ("s2", "s3"))
     checks = detector.check_signals(ctx)
     assert [check.action for check in checks] == [None, CLICK_CENTER, CLICK_CENTER]
+    assert [check.signal_name for check in checks] == [
+        "s1",
+        "s2",
+        "s3",
+    ]
     assert checks[1].coordinates == (284, 167)
     assert checks[2].coordinates == (160, 151)
 
@@ -107,6 +112,7 @@ def test_check_single_signal_scales_login_ready_marker():
 
     assert check.detected is True
     assert check.action is None
+    assert check.signal_name == "s1"
 
 
 def test_check_single_start_signal_returns_scaled_center():
@@ -134,6 +140,7 @@ def test_check_single_start_signal_returns_scaled_center():
 
     assert check.detected is True
     assert check.action == CLICK_CENTER
+    assert check.signal_name == "s3"
     assert check.coordinates == (
         239,
         226,

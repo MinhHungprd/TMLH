@@ -26,20 +26,83 @@ def roi_center(roi):
 
 
 class ScaledAssetCache:
+    # Every AutomationWorker owns a GameStateDetector, but all workers use the
+    # same immutable asset files and supported resolutions. Share the decoded
+    # and resized templates process-wide so 100 profiles do not repeat the same
+    # disk reads/resizes or keep duplicate NumPy arrays.
+    _shared_cache = {}
+    _shared_lock = threading.Lock()
+
     def __init__(self, assets_dir):
         self.assets_dir = Path(assets_dir)
+        # Keep a tiny instance-local lookup so the hot path does not acquire
+        # the shared lock after this detector has seen a template once.
         self._cache = {}
 
     def get(self, asset_name: str, width: int, height: int):
         key = (asset_name, width, height)
-        if key not in self._cache:
-            source = cv2.imread(str(self.assets_dir / asset_name), cv2.IMREAD_GRAYSCALE)
-            if source is None:
-                raise FileNotFoundError(self.assets_dir / asset_name)
-            target_width = max(1, round(source.shape[1] * width / BASE_WIDTH))
-            target_height = max(1, round(source.shape[0] * height / BASE_HEIGHT))
-            self._cache[key] = cv2.resize(source, (target_width, target_height), interpolation=cv2.INTER_AREA)
-        return self._cache[key]
+
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+
+        shared_key = (
+            str(self.assets_dir.resolve()),
+            asset_name,
+            width,
+            height,
+        )
+
+        with self._shared_lock:
+            cached = self._shared_cache.get(
+                shared_key
+            )
+
+            if cached is None:
+                source = cv2.imread(
+                    str(
+                        self.assets_dir
+                        / asset_name
+                    ),
+                    cv2.IMREAD_GRAYSCALE,
+                )
+                if source is None:
+                    raise FileNotFoundError(
+                        self.assets_dir
+                        / asset_name
+                    )
+
+                target_width = max(
+                    1,
+                    round(
+                        source.shape[1]
+                        * width
+                        / BASE_WIDTH
+                    ),
+                )
+                target_height = max(
+                    1,
+                    round(
+                        source.shape[0]
+                        * height
+                        / BASE_HEIGHT
+                    ),
+                )
+
+                cached = cv2.resize(
+                    source,
+                    (
+                        target_width,
+                        target_height,
+                    ),
+                    interpolation=cv2.INTER_AREA,
+                )
+                self._shared_cache[
+                    shared_key
+                ] = cached
+
+        self._cache[key] = cached
+        return cached
 
 
 @dataclass(frozen=True)

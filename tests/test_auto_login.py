@@ -81,6 +81,14 @@ class Input:
         return True
 
 
+def test_server_click_points_match_current_game_menu():
+    assert SERVER_POINTS == {
+        "van_lang": (439, 244),
+        "au_lac": (441, 290),
+        "server_3": (444, 197),
+    }
+
+
 def test_auto_login_scales_all_base_coordinates_to_client():
     detector = Detector()
     inputs = Input()
@@ -227,6 +235,110 @@ def test_auto_login_uses_au_lac_server_coordinate():
         SERVER_POINTS["au_lac"],
     )
 
+
+
+def test_auto_login_uses_van_xuan_server_coordinate():
+    detector = Detector()
+    inputs = Input()
+
+    context = SimpleNamespace(
+        window_handle=10,
+        process_id=20,
+        stop_event=Event(),
+    )
+
+    runner = AutoLoginRunner(
+        detector=detector,
+        input_manager=inputs,
+        wait=lambda seconds, event: False,
+    )
+
+    with patch(
+        "auto_login.get_client_size",
+        return_value=(860, 484),
+    ), patch(
+        "auto_login.set_window_topmost",
+    ):
+        runner.run(
+            context,
+            LoginCredentials(
+                username="u",
+                password="p",
+                server="server_3",
+            ),
+        )
+
+    assert inputs.calls[1] == (
+        "click",
+        (444, 197),
+    )
+
+
+def test_credential_input_retries_transient_failure():
+    attempts = []
+
+    class RetryInput(Input):
+        def click_and_paste(
+            self,
+            hwnd,
+            coordinates,
+            text,
+            stop_event=None,
+            expected_pid=None,
+        ):
+            attempts.append(
+                (
+                    coordinates,
+                    text,
+                )
+            )
+
+            if len(attempts) == 1:
+                raise RuntimeError(
+                    "foreground race"
+                )
+
+            return True
+
+    context = SimpleNamespace(
+        window_handle=10,
+        process_id=20,
+        stop_event=Event(),
+    )
+
+    logs = []
+    runner = AutoLoginRunner(
+        detector=Detector(),
+        input_manager=RetryInput(),
+        wait=lambda seconds, event: False,
+        on_log=logs.append,
+    )
+
+    with patch.object(
+        runner,
+        "_prepare_window",
+    ), patch.object(
+        runner,
+        "_scaled_point",
+        return_value=(100, 50),
+    ), patch(
+        "auto_login.find_window_for_pid",
+        return_value=11,
+    ):
+        runner._click_and_paste(
+            context,
+            USERNAME_POINT,
+            "account",
+            field_name="username",
+        )
+
+    assert len(attempts) == 2
+    assert context.window_handle == 11
+    assert any(
+        "username input retry 1/3"
+        in message
+        for message in logs
+    )
 
 
 def test_auto_login_skips_intro_before_processing_target_signal():
