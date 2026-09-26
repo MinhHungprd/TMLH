@@ -45,6 +45,8 @@ LOGIN_SECOND_SIGNAL_TIMEOUT = 25.0
 LOGIN_START_OPTIONAL_TIMEOUT = 4.0
 LOGIN_SCAN_INTERVAL = 0.35
 LOGIN_POST_SUBMIT_SETTLE = 0.35
+LOGIN_INPUT_RETRY_COUNT = 3
+LOGIN_INPUT_RETRY_DELAY = 0.15
 
 
 class AutoLoginRunner:
@@ -188,26 +190,89 @@ class AutoLoginRunner:
         context,
         base_point,
         value,
+        *,
+        field_name="input",
     ):
-        self._prepare_window(
-            context
-        )
+        last_error = None
 
-        coordinates = self._scaled_point(
-            context,
-            base_point,
-        )
-
-        if not self.input.click_and_paste(
-            context.window_handle,
-            coordinates,
-            value,
-            context.stop_event,
-            context.process_id,
+        for attempt in range(
+            1,
+            LOGIN_INPUT_RETRY_COUNT + 1,
         ):
-            raise InterruptedError(
-                "Đã dừng auto login"
+            if context.stop_event.is_set():
+                raise InterruptedError(
+                    "Đã dừng auto login"
+                )
+
+            try:
+                self._prepare_window(
+                    context
+                )
+
+                coordinates = self._scaled_point(
+                    context,
+                    base_point,
+                )
+
+                if not self.input.click_and_paste(
+                    context.window_handle,
+                    coordinates,
+                    value,
+                    context.stop_event,
+                    context.process_id,
+                ):
+                    raise InterruptedError(
+                        "Đã dừng auto login"
+                    )
+
+                return
+
+            except InterruptedError:
+                raise
+            except Exception as exc:
+                last_error = exc
+
+                self.on_log(
+                    (
+                        f"Auto login: {field_name} input "
+                        f"retry {attempt}/"
+                        f"{LOGIN_INPUT_RETRY_COUNT}: "
+                        f"{type(exc).__name__}"
+                    )
+                )
+
+                # Unity can recreate its HWND exactly while the login form is
+                # receiving focus. Rebind to the current window for this PID
+                # before retrying the field.
+                try:
+                    replacement = find_window_for_pid(
+                        context.process_id
+                    )
+                    if replacement is not None:
+                        context.window_handle = replacement
+                except Exception:
+                    pass
+
+                if (
+                    attempt
+                    < LOGIN_INPUT_RETRY_COUNT
+                ):
+                    self._wait_short(
+                        context,
+                        LOGIN_INPUT_RETRY_DELAY,
+                    )
+
+        raise RuntimeError(
+            (
+                f"Không nhập được {field_name} "
+                f"sau {LOGIN_INPUT_RETRY_COUNT} lần"
+                + (
+                    f": {last_error}"
+                    if last_error is not None
+                    else ""
+                )
             )
+        )
 
     def _wait_short(
         self,
@@ -487,20 +552,34 @@ class AutoLoginRunner:
             0.4,
         )
 
+        self.on_log(
+            "Auto login: USERNAME INPUT START"
+        )
         self._click_and_paste(
             context,
             USERNAME_POINT,
             credentials.username,
+            field_name="username",
+        )
+        self.on_log(
+            "Auto login: USERNAME INPUT OK"
         )
         self._wait_short(
             context,
             0.2,
         )
 
+        self.on_log(
+            "Auto login: PASSWORD INPUT START"
+        )
         self._click_and_paste(
             context,
             PASSWORD_POINT,
             credentials.password,
+            field_name="password",
+        )
+        self.on_log(
+            "Auto login: PASSWORD INPUT OK"
         )
         self._wait_short(
             context,
