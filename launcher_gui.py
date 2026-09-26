@@ -212,7 +212,11 @@ class ProfileController:
                 try:
                     resize_client(hwnd, width, height)
                     set_window_topmost(hwnd, True)
-                except (ValueError, OSError):
+                except (
+                    pywintypes.error,
+                    ValueError,
+                    OSError,
+                ):
                     pass
 
         return updated
@@ -3340,6 +3344,7 @@ class LauncherApp(ctk.CTk):
                         False,
                     )
                 except (
+                    pywintypes.error,
                     ValueError,
                     OSError,
                 ):
@@ -4042,7 +4047,11 @@ class LauncherApp(ctk.CTk):
             if hwnd:
                 try:
                     set_window_topmost(hwnd, False)
-                except (ValueError, OSError):
+                except (
+                    pywintypes.error,
+                    ValueError,
+                    OSError,
+                ):
                     pass
 
         for context in self._login_contexts.values():
@@ -4054,6 +4063,7 @@ class LauncherApp(ctk.CTk):
                         False,
                     )
                 except (
+                    pywintypes.error,
                     ValueError,
                     OSError,
                 ):
