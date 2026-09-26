@@ -81,6 +81,14 @@ class Input:
         return True
 
 
+def test_server_click_points_match_current_game_menu():
+    assert SERVER_POINTS == {
+        "van_lang": (439, 244),
+        "au_lac": (441, 290),
+        "server_3": (444, 197),
+    }
+
+
 def test_auto_login_scales_all_base_coordinates_to_client():
     detector = Detector()
     inputs = Input()
@@ -227,6 +235,43 @@ def test_auto_login_uses_au_lac_server_coordinate():
         SERVER_POINTS["au_lac"],
     )
 
+
+
+def test_auto_login_uses_van_xuan_server_coordinate():
+    detector = Detector()
+    inputs = Input()
+
+    context = SimpleNamespace(
+        window_handle=10,
+        process_id=20,
+        stop_event=Event(),
+    )
+
+    runner = AutoLoginRunner(
+        detector=detector,
+        input_manager=inputs,
+        wait=lambda seconds, event: False,
+    )
+
+    with patch(
+        "auto_login.get_client_size",
+        return_value=(860, 484),
+    ), patch(
+        "auto_login.set_window_topmost",
+    ):
+        runner.run(
+            context,
+            LoginCredentials(
+                username="u",
+                password="p",
+                server="server_3",
+            ),
+        )
+
+    assert inputs.calls[1] == (
+        "click",
+        (444, 197),
+    )
 
 
 def test_auto_login_skips_intro_before_processing_target_signal():
