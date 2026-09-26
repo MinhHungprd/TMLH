@@ -108,6 +108,13 @@ class ProfileController:
         with self._storage_lock:
             return next(profile for profile in self.profiles if profile.profile_id == profile_id)
 
+    def snapshot_profiles(self):
+        """Return a stable immutable snapshot for UI/background readers."""
+        with self._storage_lock:
+            return tuple(
+                self.profiles
+            )
+
     def _replace(self, old_profile_id, updated):
         with self._storage_lock:
             self.profiles = [
@@ -1687,9 +1694,17 @@ class LauncherApp(ctk.CTk):
             or profile.profile_name
         )
 
-    def _sorted_profiles(self):
+    def _sorted_profiles(
+        self,
+        profiles=None,
+    ):
+        if profiles is None:
+            profiles = (
+                self.controller.snapshot_profiles()
+            )
+
         profiles = list(
-            self.controller.profiles
+            profiles
         )
         query = (
             self.search_text.get()
@@ -1825,10 +1840,14 @@ class LauncherApp(ctk.CTk):
         ):
             return
 
+        profile_snapshot = (
+            self.controller.snapshot_profiles()
+        )
+
         valid_ids = {
             profile.profile_id
             for profile
-            in self.controller.profiles
+            in profile_snapshot
         }
         self.checked.intersection_update(
             valid_ids
@@ -1844,12 +1863,14 @@ class LauncherApp(ctk.CTk):
             child.destroy()
 
         self.profile_rows.clear()
-        profiles = self._sorted_profiles()
+        profiles = self._sorted_profiles(
+            profile_snapshot
+        )
 
         self.profile_title.configure(
             text=(
                 f"Tài khoản "
-                f"({len(self.controller.profiles)})"
+                f"({len(profile_snapshot)})"
             )
         )
         self.selected_label.configure(
@@ -1893,7 +1914,7 @@ class LauncherApp(ctk.CTk):
         if not profiles:
             message = (
                 "Không tìm thấy tài khoản."
-                if self.controller.profiles
+                if profile_snapshot
                 else (
                     "Chưa có tài khoản. "
                     "Bấm '+ Nhập tài khoản' để bắt đầu."
@@ -1912,7 +1933,7 @@ class LauncherApp(ctk.CTk):
 
         self.account_summary.configure(
             text=(
-                f"{len(self.controller.profiles)} tài khoản • "
+                f"{len(profile_snapshot)} tài khoản • "
                 "profile được tạo/xóa tự động theo tài khoản"
             )
         )
@@ -2025,7 +2046,7 @@ class LauncherApp(ctk.CTk):
         return tuple(
             profile.profile_id
             for profile
-            in self.controller.profiles
+            in self.controller.snapshot_profiles()
             if profile.profile_id
             in self.checked
         )
@@ -2137,7 +2158,7 @@ class LauncherApp(ctk.CTk):
                 profile
             )
             for profile
-            in self.controller.profiles
+            in self.controller.snapshot_profiles()
         ]
 
         AccountImportDialog(
@@ -2407,7 +2428,7 @@ class LauncherApp(ctk.CTk):
         active_workers = [
             profile.profile_id
             for profile
-            in self.controller.profiles
+            in self.controller.snapshot_profiles()
             if self.controller._worker_is_active(
                 profile.profile_id
             )
@@ -2425,7 +2446,7 @@ class LauncherApp(ctk.CTk):
             return
 
         open_games = self._running_profile_games(
-            self.controller.profiles
+            self.controller.snapshot_profiles()
         )
 
         if open_games:
